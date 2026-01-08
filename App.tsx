@@ -6,43 +6,64 @@ import { MenuView } from './views/MenuView';
 import { BakeryView } from './views/BakeryView';
 import { OrdersView } from './views/OrdersView';
 import { InfoView } from './views/InfoView';
-import { CartItem, MenuItem } from './types';
+import { ProfileView } from './views/ProfileView';
+import { CartItem, MenuItem, UserProfile, HistoricalOrder, ItemCustomization } from './types';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('home');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [loyaltyPoints, setLoyaltyPoints] = useState(0);
+  const [userProfile, setUserProfile] = useState<UserProfile>({ name: '', phone: '' });
+  const [orderHistory, setOrderHistory] = useState<HistoricalOrder[]>([]);
 
-  // Load cart and points from localStorage
+  // Load state from localStorage
   useEffect(() => {
     const savedCart = localStorage.getItem('kuci_cart');
     const savedPoints = localStorage.getItem('kuci_loyalty_points');
+    const savedUser = localStorage.getItem('kuci_user');
+    const savedHistory = localStorage.getItem('kuci_history');
+
     if (savedCart) setCart(JSON.parse(savedCart));
     if (savedPoints) setLoyaltyPoints(parseInt(savedPoints, 10));
+    if (savedUser) setUserProfile(JSON.parse(savedUser));
+    if (savedHistory) setOrderHistory(JSON.parse(savedHistory));
   }, []);
 
-  // Save cart to localStorage
+  // Sync state to localStorage
   useEffect(() => {
     localStorage.setItem('kuci_cart', JSON.stringify(cart));
-  }, [cart]);
+    localStorage.setItem('kuci_user', JSON.stringify(userProfile));
+    localStorage.setItem('kuci_history', JSON.stringify(orderHistory));
+    localStorage.setItem('kuci_loyalty_points', loyaltyPoints.toString());
+  }, [cart, userProfile, orderHistory, loyaltyPoints]);
 
-  const addToCart = (item: MenuItem) => {
+  const addToCart = (item: MenuItem, customization?: ItemCustomization) => {
     setCart(prev => {
-      const existing = prev.find(i => i.id === item.id);
-      if (existing) {
-        return prev.map(i => i.id === item.id ? { ...i, quantity: i.quantity + 1 } : i);
+      // Find if an identical item (same ID and same customization) exists
+      const existingIndex = prev.findIndex(i => {
+        if (i.id !== item.id) return false;
+        return JSON.stringify(i.customization) === JSON.stringify(customization);
+      });
+
+      if (existingIndex > -1) {
+        const updated = [...prev];
+        updated[existingIndex] = { ...updated[existingIndex], quantity: updated[existingIndex].quantity + 1 };
+        return updated;
       }
-      return [...prev, { ...item, quantity: 1 }];
+
+      const newCartItem: CartItem = {
+        ...item,
+        quantity: 1,
+        customization,
+        instanceId: Math.random().toString(36).substr(2, 9)
+      };
+      return [...prev, newCartItem];
     });
   };
 
-  const removeFromCart = (itemId: string) => {
-    setCart(prev => prev.filter(i => i.id !== itemId));
-  };
-
-  const updateQuantity = (itemId: string, delta: number) => {
+  const updateQuantity = (instanceId: string, delta: number) => {
     setCart(prev => prev.map(i => {
-      if (i.id === itemId) {
+      if (i.instanceId === instanceId) {
         const newQty = Math.max(0, i.quantity + delta);
         return { ...i, quantity: newQty };
       }
@@ -52,27 +73,56 @@ const App: React.FC = () => {
 
   const clearCart = () => setCart([]);
 
+  const completeOrder = (order: HistoricalOrder) => {
+    const earned = Math.floor(order.total / 100);
+    setLoyaltyPoints(prev => prev + earned);
+    setOrderHistory(prev => [order, ...prev]);
+    clearCart();
+  };
+
+  const reorder = (items: CartItem[]) => {
+    setCart(items.map(item => ({...item, instanceId: Math.random().toString(36).substr(2, 9)})));
+    setActiveTab('orders');
+  };
+
   const renderView = () => {
     switch (activeTab) {
-      case 'home': return <HomeView onCategorySelect={(cat) => { setActiveTab('menu'); /* and scroll to category? */ }} addToCart={addToCart} />;
+      case 'home': return <HomeView onCategorySelect={(cat) => setActiveTab('menu')} addToCart={addToCart} />;
       case 'menu': return <MenuView addToCart={addToCart} />;
       case 'bakery': return <BakeryView />;
       case 'orders': return (
         <OrdersView 
           cart={cart} 
           updateQuantity={updateQuantity} 
-          removeFromCart={removeFromCart} 
+          removeFromCart={(id) => updateQuantity(id, -1)} 
           clearCart={clearCart}
           loyaltyPoints={loyaltyPoints}
+          userProfile={userProfile}
+          setUserProfile={setUserProfile}
+          onOrderComplete={completeOrder}
         />
       );
       case 'info': return <InfoView />;
+      case 'profile': return (
+        <ProfileView 
+          userProfile={userProfile} 
+          setUserProfile={setUserProfile} 
+          loyaltyPoints={loyaltyPoints}
+          orderHistory={orderHistory}
+          onReorder={reorder}
+        />
+      );
       default: return <HomeView onCategorySelect={() => setActiveTab('menu')} addToCart={addToCart} />;
     }
   };
 
   return (
-    <Layout activeTab={activeTab} setActiveTab={setActiveTab} cartCount={cart.reduce((acc, i) => acc + i.quantity, 0)}>
+    <Layout 
+      activeTab={activeTab} 
+      setActiveTab={setActiveTab} 
+      cartCount={cart.reduce((acc, i) => acc + i.quantity, 0)}
+      userPhoto={userProfile.photo}
+    >
       {renderView()}
     </Layout>
   );

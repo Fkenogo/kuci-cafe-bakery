@@ -35,8 +35,18 @@ export interface MenuItem {
   note?: string;
 }
 
+export interface ItemCustomization {
+  sides?: string[];
+  toppings?: string[];
+  extras?: string[]; // Up to 2 specific extra items (e.g., "Extra Sauce")
+  instructions?: string; // General prep instructions
+  extraCost: number;
+}
+
 export interface CartItem extends MenuItem {
   quantity: number;
+  customization?: ItemCustomization;
+  instanceId: string; // Unique ID for items with different customizations
 }
 
 export enum OrderType {
@@ -55,4 +65,18 @@ export interface DeliveryInfo {
   area: DeliveryArea;
   fee: number;
   estimatedTime: string;
+}
+
+export interface UserProfile {
+  name: string;
+  phone: string;
+  photo?: string;
+}
+
+export interface HistoricalOrder {
+  id: string;
+  date: string;
+  items: CartItem[];
+  total: number;
+  type: OrderType;
 }

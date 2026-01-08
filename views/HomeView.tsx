@@ -1,6 +1,6 @@
 
 import React, { useMemo } from 'react';
-import { Search, ChevronRight, MessageCircle, Sparkles, Clock, Plus, History } from 'lucide-react';
+import { Search, ChevronRight, MessageCircle, Sparkles, Clock, Plus, History, Coffee as CoffeeIcon } from 'lucide-react';
 import { MENU_ITEMS, CONTACT_INFO, CATEGORY_ICONS } from '../constants';
 import { Category, MenuItem } from '../types';
 
@@ -15,7 +15,12 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart 
     "Signature Meals", "Kuci Burgers", "Kuci Pizza", "Kuci Pasta", "Kuci Salads", "Kuci Desserts"
   ];
 
-  const espressoMartini = useMemo(() => MENU_ITEMS.find(i => i.id === 'ck-em'), []);
+  // Barista's Choice: Balanced selection of 2 Coffees and 2 Cocktails
+  const baristaChoices = useMemo(() => {
+    const coffees = MENU_ITEMS.filter(i => i.category === "Coffee & Espresso").slice(0, 2);
+    const cocktails = MENU_ITEMS.filter(i => i.category === "Café Signature Cocktails").slice(0, 2);
+    return [...coffees, ...cocktails];
+  }, []);
 
   // Personalized section: Recent Orders Quick Reorder
   const recentOrdersData = useMemo(() => {
@@ -84,42 +89,57 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart 
         </div>
       </section>
 
-      {/* Barista's Choice Featured Section */}
-      <section className="px-4">
-        <div className="bg-[#f97316]/5 border-2 border-dashed border-[#f97316]/20 rounded-[40px] p-1 overflow-hidden">
-          <div className="bg-white rounded-[38px] overflow-hidden shadow-sm">
-            <div className="relative h-48">
-              <img 
-                src="https://images.unsplash.com/photo-1545438102-799c3991ffb2?auto=format&fit=crop&q=80&w=800" 
-                alt="Espresso Martini" 
-                className="w-full h-full object-cover"
-              />
-              <div className="absolute top-4 left-4">
-                <div className="bg-[#f97316] text-white px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest shadow-lg flex items-center gap-2">
-                  <Sparkles className="w-3 h-3" /> Barista's Choice
+      {/* Barista's Choice HORIZONTAL CAROUSEL Section */}
+      <section className="px-4 space-y-5">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xl font-serif flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-[#f97316]" />
+            Barista's Choice
+          </h3>
+          <span className="text-[9px] text-[#f97316] font-black uppercase tracking-widest">Masterfully Crafted</span>
+        </div>
+        
+        <div className="flex gap-5 overflow-x-auto no-scrollbar pb-4 -mx-4 px-4">
+          {baristaChoices.map((item) => (
+            <div 
+              key={item.id} 
+              className="min-w-[280px] bg-white rounded-[40px] shadow-lg border border-[#f97316]/10 overflow-hidden flex flex-col group active:scale-[0.98] transition-transform"
+            >
+              <div className="h-44 relative overflow-hidden">
+                <img 
+                  src={item.category === 'Café Signature Cocktails' 
+                    ? "https://images.unsplash.com/photo-1545438102-799c3991ffb2?auto=format&fit=crop&q=80&w=400" 
+                    : "https://images.unsplash.com/photo-1509042239860-f550ce710b93?auto=format&fit=crop&q=80&w=400"
+                  } 
+                  alt={item.name} 
+                  className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-[#3e2723]/60 via-transparent to-transparent opacity-60" />
+                <div className="absolute top-4 left-4 bg-[#f97316] text-white px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest">
+                  {item.category.replace('Café ', '')}
+                </div>
+                <div className="absolute bottom-4 right-4 bg-white/95 backdrop-blur-md px-3 py-1.5 rounded-full text-[#3e2723] font-black text-xs shadow-md">
+                  {item.price.toLocaleString()} RWF
                 </div>
               </div>
-            </div>
-            <div className="p-6 space-y-4">
-              <div className="flex justify-between items-start">
-                <div>
-                  <h3 className="text-2xl font-serif text-[#3e2723]">{espressoMartini?.name || "Espresso Martini"}</h3>
-                  <p className="text-[#f97316] text-[10px] font-black uppercase tracking-[0.2em] mt-1">Café Signature Cocktail</p>
+              
+              <div className="p-6 space-y-3 flex-1 flex flex-col">
+                <div className="flex-1">
+                  <h4 className="text-lg font-serif text-[#3e2723] line-clamp-1">{item.name}</h4>
+                  <p className="text-sm text-[#3e2723]/60 italic line-clamp-2 mt-2 leading-relaxed">
+                    "{item.description}"
+                  </p>
                 </div>
-                <span className="text-xl font-black text-[#3e2723]">{espressoMartini?.price.toLocaleString()} RWF</span>
+                
+                <button 
+                  onClick={() => addToCart(item)}
+                  className="w-full bg-[#f97316]/10 text-[#f97316] py-3 rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all active:bg-[#f97316] active:text-white flex items-center justify-center gap-2"
+                >
+                  <Plus className="w-3 h-3" /> Add Choice
+                </button>
               </div>
-              <p className="text-sm text-[#3e2723]/70 italic leading-relaxed">
-                "{espressoMartini?.description || "Vodka blended with rich coffee liqueur and freshly pulled espresso. Smooth, bold, and energizing with a refined coffee kick."}"
-              </p>
-              <button 
-                onClick={() => espressoMartini && addToCart(espressoMartini)}
-                className="w-full bg-[#3e2723] text-white py-4 rounded-2xl font-bold transition-all active:scale-95 shadow-md flex items-center justify-center gap-3 group"
-              >
-                <Plus className="w-5 h-5 group-active:rotate-90 transition-transform" />
-                Add Barista's Choice
-              </button>
             </div>
-          </div>
+          ))}
         </div>
       </section>
 
@@ -165,7 +185,7 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart 
           {featured.map((item) => (
             <div key={item.id} className="min-w-[280px] bg-white rounded-[40px] shadow-xl border border-[#f5f5dc]/50 overflow-hidden flex flex-col">
               <div className="h-44 relative">
-                <img src={`https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&q=80&w=400`} className="w-full h-full object-cover" />
+                <img src={`https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&q=80&w=400`} className="w-full h-full object-cover" alt={item.name} />
                 <div className="absolute top-4 right-4 bg-white/95 backdrop-blur-md px-4 py-1.5 rounded-full text-[#f97316] font-black text-xs shadow-lg">
                   {item.price.toLocaleString()} RWF
                 </div>

@@ -7,9 +7,10 @@ interface LayoutProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   cartCount: number;
+  userPhoto?: string;
 }
 
-export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab, cartCount }) => {
+export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab, cartCount, userPhoto }) => {
   const tabs = [
     { id: 'home', icon: Home, label: 'Home' },
     { id: 'menu', icon: MenuIcon, label: 'Menu' },
@@ -29,8 +30,19 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTa
             <p className="text-[10px] uppercase tracking-widest text-[#f97316] font-bold">Café & Bakery</p>
           </div>
         </div>
-        <button className="p-2 rounded-full hover:bg-orange-50 transition-colors">
-          <User className="w-6 h-6 text-[#3e2723]" />
+        <button 
+          onClick={() => setActiveTab('profile')}
+          className={`w-10 h-10 rounded-full flex items-center justify-center transition-all overflow-hidden border-2 shadow-sm ${
+            activeTab === 'profile' 
+              ? 'border-[#f97316] bg-orange-100 ring-4 ring-orange-50' 
+              : 'border-transparent hover:bg-orange-50 bg-[#f5f5dc]/50'
+          }`}
+        >
+          {userPhoto ? (
+            <img src={userPhoto} alt="Profile" className="w-full h-full object-cover" />
+          ) : (
+            <User className={`w-5 h-5 ${activeTab === 'profile' ? 'text-[#f97316]' : 'text-[#3e2723]'}`} />
+          )}
         </button>
       </header>
 

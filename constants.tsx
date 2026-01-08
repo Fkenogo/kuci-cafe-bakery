@@ -28,6 +28,22 @@ export const COLORS = {
   bgSecondary: '#f5f5dc', // Light Beige
 };
 
+export const EXTRA_COSTS = {
+  TOPPING: 1000,
+  OTHER_EXTRA: 1000,
+};
+
+export const CUSTOMIZATION_OPTIONS = {
+  SIDES: [
+    "Plain Rice", "Pilau Rice", "Spaghetti", "Boiled Potatoes", 
+    "Boiled Bananas", "French Fries", "Lyonaise Potatoes", 
+    "Fresh Beans", "Mixed Vegetables", "Greens"
+  ],
+  PIZZA_TOPPINGS: [
+    "Mushroom", "Spinach", "Green Pepper", "Pineapple", "Onions", "Roasted Red Pepper"
+  ]
+};
+
 export const CONTACT_INFO = {
   phone: '+250795306488',
   whatsapp: '+250783959404',
@@ -82,7 +98,7 @@ export const CATEGORY_ICONS: Record<Category, React.ReactNode> = {
   "Bakery & Pastries": <Cookie className="w-5 h-5" />,
 };
 
-const ACCOMPANIMENTS_NOTE = "Served with any 2: Plain Rice, Pilau Rice, Spaghetti, Boiled Potatoes, Boiled Bananas, French Fries, Lyonaise Potatoes, Fresh Beans, Mixed Vegetables, or Greens.";
+export const ACCOMPANIMENTS_NOTE = "Served with any 2: Plain Rice, Pilau Rice, Spaghetti, Boiled Potatoes, Boiled Bananas, French Fries, Lyonaise Potatoes, Fresh Beans, Mixed Vegetables, or Greens.";
 
 export const MENU_ITEMS: MenuItem[] = [
   // SIGNATURE MEALS
