@@ -1,12 +1,13 @@
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Search, ChevronRight, MessageCircle, Sparkles, Clock, Plus, History, Coffee as CoffeeIcon } from 'lucide-react';
 import { MENU_ITEMS, CONTACT_INFO, CATEGORY_ICONS } from '../constants';
-import { Category, MenuItem } from '../types';
+import { Category, MenuItem, ItemCustomization } from '../types';
+import { CustomizerModal } from '../components/CustomizerModal';
 
 interface HomeViewProps {
   onCategorySelect: (cat: Category) => void;
-  addToCart: (item: MenuItem) => void;
+  addToCart: (item: MenuItem, customization?: ItemCustomization) => void;
 }
 
 export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart }) => {
@@ -15,16 +16,15 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart 
     "Signature Meals", "Kuci Burgers", "Kuci Pizza", "Kuci Pasta", "Kuci Salads", "Kuci Desserts"
   ];
 
-  // Barista's Choice: Balanced selection of 2 Coffees and 2 Cocktails
+  const [customizingItem, setCustomizingItem] = useState<MenuItem | null>(null);
+
   const baristaChoices = useMemo(() => {
     const coffees = MENU_ITEMS.filter(i => i.category === "Coffee & Espresso").slice(0, 2);
     const cocktails = MENU_ITEMS.filter(i => i.category === "Café Signature Cocktails").slice(0, 2);
     return [...coffees, ...cocktails];
   }, []);
 
-  // Personalized section: Recent Orders Quick Reorder
   const recentOrdersData = useMemo(() => {
-    // Using sample data for testing as requested: Classic Burger and Cappuccino
     const sampleIds = ['bg-1', 'cf-1']; 
     const items = MENU_ITEMS.filter(i => sampleIds.includes(i.id));
     
@@ -35,8 +35,19 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart 
     };
   }, []);
 
+  const handleCustomizationConfirm = (item: MenuItem, customization: ItemCustomization) => {
+    addToCart(item, customization);
+    setCustomizingItem(null);
+  };
+
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 pb-10">
+      <CustomizerModal 
+        item={customizingItem}
+        onClose={() => setCustomizingItem(null)}
+        onConfirm={handleCustomizationConfirm}
+      />
+
       {/* Hero Banner */}
       <section className="relative h-72 overflow-hidden rounded-b-[40px] shadow-2xl">
         <img 
@@ -89,7 +100,7 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart 
         </div>
       </section>
 
-      {/* Barista's Choice HORIZONTAL CAROUSEL Section */}
+      {/* Barista's Choice */}
       <section className="px-4 space-y-5">
         <div className="flex items-center justify-between">
           <h3 className="text-xl font-serif flex items-center gap-2">
@@ -103,7 +114,8 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart 
           {baristaChoices.map((item) => (
             <div 
               key={item.id} 
-              className="min-w-[280px] bg-white rounded-[40px] shadow-lg border border-[#f97316]/10 overflow-hidden flex flex-col group active:scale-[0.98] transition-transform"
+              onClick={() => setCustomizingItem(item)}
+              className="min-w-[280px] bg-white rounded-[40px] shadow-lg border border-[#f97316]/10 overflow-hidden flex flex-col group active:scale-[0.98] transition-all cursor-pointer hover:shadow-2xl hover:-translate-y-1"
             >
               <div className="h-44 relative overflow-hidden">
                 <img 
@@ -131,12 +143,9 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart 
                   </p>
                 </div>
                 
-                <button 
-                  onClick={() => addToCart(item)}
-                  className="w-full bg-[#f97316]/10 text-[#f97316] py-3 rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all active:bg-[#f97316] active:text-white flex items-center justify-center gap-2"
-                >
+                <div className="w-full bg-[#f97316]/10 text-[#f97316] py-3 rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all active:bg-[#f97316] active:text-white flex items-center justify-center gap-2">
                   <Plus className="w-3 h-3" /> Add Choice
-                </button>
+                </div>
               </div>
             </div>
           ))}
@@ -159,7 +168,7 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart 
             {recentOrdersData.items.map(item => (
               <button 
                 key={item.id}
-                onClick={() => addToCart(item)}
+                onClick={() => setCustomizingItem(item)}
                 className="bg-white p-4 rounded-2xl shadow-sm border border-[#f5f5dc] flex flex-col items-start gap-2 active:scale-95 transition-all text-left group"
               >
                 <div className="flex items-center justify-between w-full">
@@ -183,7 +192,11 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart 
         <h3 className="text-xl font-serif mb-5">Today's Specials</h3>
         <div className="flex gap-6 overflow-x-auto no-scrollbar pb-6 -mx-1 px-1">
           {featured.map((item) => (
-            <div key={item.id} className="min-w-[280px] bg-white rounded-[40px] shadow-xl border border-[#f5f5dc]/50 overflow-hidden flex flex-col">
+            <div 
+              key={item.id} 
+              onClick={() => setCustomizingItem(item)}
+              className="min-w-[280px] bg-white rounded-[40px] shadow-xl border border-[#f5f5dc]/50 overflow-hidden flex flex-col cursor-pointer active:scale-[0.98] transition-all hover:-translate-y-1"
+            >
               <div className="h-44 relative">
                 <img src={`https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&q=80&w=400`} className="w-full h-full object-cover" alt={item.name} />
                 <div className="absolute top-4 right-4 bg-white/95 backdrop-blur-md px-4 py-1.5 rounded-full text-[#f97316] font-black text-xs shadow-lg">
@@ -200,19 +213,15 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart 
                 <p className="text-[#3e2723]/60 text-[11px] line-clamp-3 leading-relaxed flex-1 italic">
                   "{item.description}"
                 </p>
-                <button 
-                  onClick={() => addToCart(item)}
-                  className="mt-6 w-full bg-[#3e2723] text-white py-4 rounded-2xl font-bold transition-all active:scale-95 shadow-lg flex items-center justify-center gap-2"
-                >
+                <div className="mt-6 w-full bg-[#3e2723] text-white py-4 rounded-2xl font-bold transition-all shadow-lg flex items-center justify-center gap-2">
                   Add to Cart
-                </button>
+                </div>
               </div>
             </div>
           ))}
         </div>
       </section>
 
-      {/* Floating Action Button for WhatsApp */}
       <a 
         href={`https://wa.me/${CONTACT_INFO.whatsapp}?text=Hello Kuci! I'd like to place an order.`}
         className="fixed bottom-24 right-6 z-50 bg-[#25D366] text-white p-5 rounded-full shadow-2xl flex items-center justify-center animate-bounce hover:scale-110 active:scale-90 transition-all border-4 border-white"
