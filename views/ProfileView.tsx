@@ -1,7 +1,8 @@
 
 import React, { useState, useRef } from 'react';
-import { User, Phone, Sparkles, History, ShoppingBag, ChevronRight, Save, LogOut, Coffee, Camera, Upload } from 'lucide-react';
-import { UserProfile, HistoricalOrder, CartItem } from '../types';
+import { User, Phone, Sparkles, History, ShoppingBag, ChevronRight, Save, LogOut, Coffee, Camera, Upload, Heart, Utensils, Trash2 } from 'lucide-react';
+import { UserProfile, HistoricalOrder, CartItem, MenuItem } from '../types';
+import { CATEGORY_ICONS } from '../constants';
 
 interface ProfileViewProps {
   userProfile: UserProfile;
@@ -9,10 +10,13 @@ interface ProfileViewProps {
   loyaltyPoints: number;
   orderHistory: HistoricalOrder[];
   onReorder: (items: CartItem[]) => void;
+  wishlist: MenuItem[];
+  toggleWishlist: (item: MenuItem) => void;
+  addToCart: (item: MenuItem) => void;
 }
 
 export const ProfileView: React.FC<ProfileViewProps> = ({ 
-  userProfile, setUserProfile, loyaltyPoints, orderHistory, onReorder 
+  userProfile, setUserProfile, loyaltyPoints, orderHistory, onReorder, wishlist, toggleWishlist, addToCart 
 }) => {
   const [isEditing, setIsEditing] = useState(!userProfile.name);
   const [tempName, setTempName] = useState(userProfile.name);
@@ -75,7 +79,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       <section className="bg-white rounded-[32px] p-6 shadow-sm border border-[#f5f5dc] space-y-6">
         {isEditing ? (
           <div className="space-y-6">
-             {/* Horizontal Profile Header in Edit Mode */}
              <div className="flex items-center gap-5 border-b border-[#f5f5dc] pb-6">
                <div 
                  onClick={triggerFileInput}
@@ -134,7 +137,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           </div>
         ) : (
           <div className="space-y-6">
-             {/* Horizontal Info in View Mode */}
              <div className="flex items-center gap-5">
                 <div className="w-20 h-20 bg-[#f5f5dc] rounded-full flex items-center justify-center text-[#3e2723] overflow-hidden border-2 border-[#f5f5dc] shrink-0 shadow-sm">
                    {userProfile.photo ? (
@@ -163,6 +165,54 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                    <h4 className="font-bold text-[#3e2723] text-sm">{userProfile.phone || 'Not provided'}</h4>
                 </div>
              </div>
+          </div>
+        )}
+      </section>
+
+      {/* Wishlist Section */}
+      <section className="space-y-5">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xl font-serif">My Wishlist</h3>
+          <div className="flex items-center gap-1 text-red-400">
+             <Heart className="w-4 h-4 fill-current" />
+             <span className="text-[9px] font-black uppercase tracking-widest">Saved Items</span>
+          </div>
+        </div>
+
+        {wishlist.length > 0 ? (
+          <div className="grid grid-cols-1 gap-4">
+            {wishlist.map((item) => (
+              <div key={item.id} className="bg-white rounded-3xl p-5 border border-[#f5f5dc] shadow-sm flex items-center gap-4 animate-in zoom-in-95 duration-300">
+                <div className="w-14 h-14 bg-[#f5f5dc] rounded-2xl flex items-center justify-center text-[#3e2723] shrink-0">
+                  {CATEGORY_ICONS[item.category] || <Utensils className="w-6 h-6" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-bold text-[#3e2723] text-sm uppercase font-serif truncate">{item.name}</h4>
+                  <p className="text-[10px] text-[#f97316] font-bold uppercase tracking-widest">{item.price.toLocaleString()} RWF</p>
+                </div>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => addToCart(item)}
+                    className="p-3 bg-orange-100 text-[#f97316] rounded-xl active:scale-90 transition-transform"
+                    title="Add to Cart"
+                  >
+                    <ShoppingBag className="w-4 h-4" />
+                  </button>
+                  <button 
+                    onClick={() => toggleWishlist(item)}
+                    className="p-3 bg-red-50 text-red-400 rounded-xl active:scale-90 transition-transform"
+                    title="Remove from Wishlist"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-12 bg-white rounded-[40px] border-2 border-dashed border-[#f5f5dc]">
+             <Heart className="w-8 h-8 text-gray-200 mx-auto mb-3" />
+             <p className="text-[11px] text-[#3e2723]/30 italic px-10">"Found something you like? Heart it to see it here later."</p>
           </div>
         )}
       </section>

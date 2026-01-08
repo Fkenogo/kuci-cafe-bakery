@@ -41,6 +41,12 @@ export const CUSTOMIZATION_OPTIONS = {
   ],
   PIZZA_TOPPINGS: [
     "Mushroom", "Spinach", "Green Pepper", "Pineapple", "Onions", "Roasted Red Pepper"
+  ],
+  BREAKFAST_TOPPINGS: [
+    "Maple Syrup", "Fresh Fruit", "Whipped Cream", "Honey", "Chocolate Sauce"
+  ],
+  BURRITO_FILLINGS: [
+    "Extra Eggs", "Extra Cheese", "Extra Bacon", "Double Salsa", "Sausage", "Avocado"
   ]
 };
 
@@ -48,6 +54,7 @@ export const CONTACT_INFO = {
   phone: '+250795306488',
   whatsapp: '+250783959404',
   location: 'Nyamata, Bugesera, Rwanda (Opposite AFOS Bugesera)',
+  mapLink: "https://www.google.com/maps/place/2%C2%B008'46.6%22S+30%C2%B005'20.0%22E/@-2.146271,30.086319,17z/data=!3m1!4b1!4m4!3m3!8m2!3d-2.146271!4d30.0888939?hl=en&entry=ttu",
   contactPerson: 'Lorraine Ingabire',
   paybill: '6482249',
   vendor: 'KUCI HOLDINGS'
@@ -1266,6 +1273,7 @@ export const MENU_ITEMS: MenuItem[] = [
     description: 'Thick, creamy, and dreamy.',
     category: 'Milk Shake'
   },
+  // Fix: Added missing 'category' property and corrected 'description' for 'CARAMEL SHAKE'
   {
     id: 'mk-9',
     name: 'CARAMEL SHAKE',
@@ -1445,6 +1453,22 @@ export const MENU_ITEMS: MenuItem[] = [
     price: 5000,
     tagline: 'Local morning magic',
     description: 'The traditional way to start strong. Rich, hearty, authentic.',
+    category: 'Kuci Breakfast'
+  },
+  {
+    id: 'br-7',
+    name: 'PANCAKES & WAFFLES',
+    price: 4500,
+    tagline: 'Sweet morning bliss',
+    description: 'Your choice of golden pancakes or crispy waffles. A canvas for your favorite sweet toppings.',
+    category: 'Kuci Breakfast'
+  },
+  {
+    id: 'br-8',
+    name: 'BREAKFAST BURRITO',
+    price: 5500,
+    tagline: 'Hearty handheld energy',
+    description: 'A warm tortilla packed with scrambled eggs, melted cheese, and crispy bacon. Served with our house salsa.',
     category: 'Kuci Breakfast'
   },
 

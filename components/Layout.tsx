@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Home, Menu as MenuIcon, Cookie, ShoppingBag, Info, User } from 'lucide-react';
 
 interface LayoutProps {
@@ -11,6 +11,17 @@ interface LayoutProps {
 }
 
 export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab, cartCount, userPhoto }) => {
+  const [isBouncing, setIsBouncing] = useState(false);
+
+  // Trigger animation when cart count increases
+  useEffect(() => {
+    if (cartCount > 0) {
+      setIsBouncing(true);
+      const timer = setTimeout(() => setIsBouncing(false), 400);
+      return () => clearTimeout(timer);
+    }
+  }, [cartCount]);
+
   const tabs = [
     { id: 'home', icon: Home, label: 'Home' },
     { id: 'menu', icon: MenuIcon, label: 'Menu' },
@@ -56,6 +67,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTa
         <div className="flex items-center justify-around py-2 px-1">
           {tabs.map((tab) => {
             const isActive = activeTab === tab.id;
+            const isCart = tab.id === 'orders';
             const Icon = tab.icon;
             return (
               <button
@@ -63,7 +75,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTa
                 onClick={() => setActiveTab(tab.id)}
                 className={`flex flex-col items-center justify-center w-16 h-14 relative transition-all ${
                   isActive ? 'text-[#f97316]' : 'text-gray-400'
-                }`}
+                } ${isCart && isBouncing ? 'animate-cart-pop' : ''}`}
               >
                 {isActive && (
                   <div className="absolute top-0 w-full h-1 bg-[#f97316] rounded-full" />
@@ -71,7 +83,7 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTa
                 <Icon className={`w-6 h-6 ${isActive ? 'scale-110' : ''} transition-transform`} />
                 <span className="text-[10px] font-medium mt-1 uppercase tracking-tighter">{tab.label}</span>
                 {tab.badge && tab.badge > 0 && (
-                  <span className="absolute top-2 right-3 bg-[#f97316] text-white text-[8px] font-bold w-4 h-4 rounded-full flex items-center justify-center border-2 border-white">
+                  <span className={`absolute top-2 right-3 bg-[#f97316] text-white text-[8px] font-bold w-4 h-4 rounded-full flex items-center justify-center border-2 border-white transition-all ${isBouncing ? 'scale-125' : 'scale-100'}`}>
                     {tab.badge}
                   </span>
                 )}

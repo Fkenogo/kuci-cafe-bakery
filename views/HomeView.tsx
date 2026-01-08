@@ -1,22 +1,70 @@
 
-import React, { useMemo, useState } from 'react';
-import { Search, ChevronRight, MessageCircle, Sparkles, Clock, Plus, History, Coffee as CoffeeIcon } from 'lucide-react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
+import { Search, ChevronRight, MessageCircle, Sparkles, Clock, Plus, History, X, Utensils, Heart, ShoppingBag, Coffee } from 'lucide-react';
 import { MENU_ITEMS, CONTACT_INFO, CATEGORY_ICONS } from '../constants';
-import { Category, MenuItem, ItemCustomization } from '../types';
+import { Category, MenuItem, ItemCustomization, HistoricalOrder } from '../types';
 import { CustomizerModal } from '../components/CustomizerModal';
 
 interface HomeViewProps {
   onCategorySelect: (cat: Category) => void;
   addToCart: (item: MenuItem, customization?: ItemCustomization) => void;
+  wishlist: MenuItem[];
+  toggleWishlist: (item: MenuItem);
+  orderHistory: HistoricalOrder[];
 }
 
-export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart }) => {
+export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart, wishlist, toggleWishlist, orderHistory }) => {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showResults, setShowResults] = useState(false);
+  const [customizingItem, setCustomizingItem] = useState<MenuItem | null>(null);
+  const searchRef = useRef<HTMLDivElement>(null);
+
   const featured = MENU_ITEMS.slice(0, 5);
   const categories: Category[] = [
     "Signature Meals", "Kuci Burgers", "Kuci Pizza", "Kuci Pasta", "Kuci Salads", "Kuci Desserts"
   ];
 
-  const [customizingItem, setCustomizingItem] = useState<MenuItem | null>(null);
+  const isInWishlist = (id: string) => wishlist.some(i => i.id === id);
+
+  // Extract last 4 unique items from order history
+  const recentItems = useMemo(() => {
+    const items: MenuItem[] = [];
+    const seenIds = new Set<string>();
+    
+    for (const order of orderHistory) {
+      for (const item of order.items) {
+        if (!seenIds.has(item.id)) {
+          items.push(item);
+          seenIds.add(item.id);
+          if (items.length >= 4) break;
+        }
+      }
+      if (items.length >= 4) break;
+    }
+    return items;
+  }, [orderHistory]);
+
+  // Dynamic Search Results: Filters by name, description, and category
+  const searchResults = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    const query = searchQuery.toLowerCase();
+    return MENU_ITEMS.filter(item => 
+      item.name.toLowerCase().includes(query) || 
+      item.description.toLowerCase().includes(query) ||
+      item.category.toLowerCase().includes(query)
+    ).slice(0, 8); 
+  }, [searchQuery]);
+
+  // Close results when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
+        setShowResults(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const baristaChoices = useMemo(() => {
     const coffees = MENU_ITEMS.filter(i => i.category === "Coffee & Espresso").slice(0, 2);
@@ -24,24 +72,25 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart 
     return [...coffees, ...cocktails];
   }, []);
 
-  const recentOrdersData = useMemo(() => {
-    const sampleIds = ['bg-1', 'cf-1']; 
-    const items = MENU_ITEMS.filter(i => sampleIds.includes(i.id));
-    
-    return {
-      title: "Your Recent Orders",
-      message: "Ready for your favorites? Tap to quickly add your usual picks back to your cart.",
-      items: items
-    };
-  }, []);
-
   const handleCustomizationConfirm = (item: MenuItem, customization: ItemCustomization) => {
     addToCart(item, customization);
     setCustomizingItem(null);
   };
 
+  const handleSearchResultClick = (item: MenuItem) => {
+    setCustomizingItem(item);
+    setSearchQuery('');
+    setShowResults(false);
+  };
+
+  const navigateToFullMenu = () => {
+    onCategorySelect("Signature Meals");
+    setShowResults(false);
+    setSearchQuery('');
+  };
+
   return (
-    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 pb-10">
+    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 pb-10 overflow-x-hidden">
       <CustomizerModal 
         item={customizingItem}
         onClose={() => setCustomizingItem(null)}
@@ -49,7 +98,7 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart 
       />
 
       {/* Hero Banner */}
-      <section className="relative h-72 overflow-hidden rounded-b-[40px] shadow-2xl">
+      <section className="relative h-72 sm:h-80 overflow-hidden rounded-b-[40px] shadow-2xl">
         <img 
           src="https://images.unsplash.com/photo-1554118811-1e0d58224f24?auto=format&fit=crop&q=80&w=800" 
           className="w-full h-full object-cover scale-105"
@@ -64,16 +113,98 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart 
         </div>
       </section>
 
-      {/* Search Bar */}
-      <section className="px-4 -mt-10 relative z-10">
-        <div className="relative group">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 group-focus-within:text-[#f97316] transition-colors" />
+      {/* Responsive & Dynamic Search Bar */}
+      <section className="px-4 -mt-10 relative z-40" ref={searchRef}>
+        <div className="relative group max-w-lg mx-auto">
+          <div className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center">
+            <Search className={`w-full h-full transition-colors ${searchQuery ? 'text-[#f97316]' : 'text-[#f97316]/40'}`} />
+          </div>
           <input 
             type="text" 
+            value={searchQuery}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setShowResults(true);
+            }}
+            onFocus={() => setShowResults(true)}
             placeholder="Search our delicious menu..." 
-            className="w-full pl-12 pr-4 py-5 rounded-3xl border-none bg-white shadow-xl focus:ring-2 focus:ring-[#f97316] outline-none text-[#3e2723] text-sm"
+            className="w-full pl-14 pr-14 py-5 rounded-full border-[3px] border-[#f97316] bg-white shadow-2xl focus:ring-4 focus:ring-[#f97316]/20 outline-none text-[#3e2723] text-base font-medium transition-all placeholder:text-gray-300"
           />
+          {searchQuery && (
+            <button 
+              onClick={() => { setSearchQuery(''); setShowResults(false); }}
+              className="absolute right-5 top-1/2 -translate-y-1/2 p-1.5 bg-gray-100 rounded-full hover:bg-orange-100 transition-colors"
+              aria-label="Clear search"
+            >
+              <X className="w-4 h-4 text-[#f97316]" />
+            </button>
+          )}
         </div>
+
+        {/* Live Search Results Dropdown */}
+        {showResults && searchQuery.trim() && (
+          <div className="absolute top-[110%] left-4 right-4 max-w-lg mx-auto bg-white rounded-[32px] shadow-2xl border border-[#f5f5dc] overflow-hidden animate-in slide-in-from-top-2 duration-300">
+            {searchResults.length > 0 ? (
+              <div className="max-h-[60vh] overflow-y-auto no-scrollbar py-2">
+                <div className="px-6 py-3 border-b border-[#f5f5dc] flex items-center justify-between bg-orange-50/30">
+                   <span className="text-[10px] font-black text-[#f97316] uppercase tracking-widest">Matching Items</span>
+                   <span className="text-[10px] text-[#3e2723]/40 font-bold uppercase tracking-widest">{searchResults.length} results</span>
+                </div>
+                {searchResults.map((item) => (
+                  <div
+                    key={item.id}
+                    className="w-full flex items-center gap-4 px-6 py-4 hover:bg-orange-50 transition-colors border-b border-[#f5f5dc]/50 last:border-none text-left group relative"
+                  >
+                    <button 
+                      onClick={() => handleSearchResultClick(item)}
+                      className="flex-1 flex items-center gap-4 text-left min-w-0"
+                    >
+                      <div className="w-12 h-12 bg-[#f5f5dc] rounded-2xl flex items-center justify-center text-[#3e2723] shrink-0 group-hover:bg-[#f97316] group-hover:text-white transition-colors">
+                        {CATEGORY_ICONS[item.category] || <Utensils className="w-5 h-5" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h4 className="text-sm font-bold text-[#3e2723] truncate group-hover:text-[#f97316] transition-colors uppercase font-serif">{item.name}</h4>
+                        <p className="text-[9px] text-gray-400 font-bold uppercase tracking-widest">{item.category}</p>
+                      </div>
+                      <div className="text-right mr-8">
+                        <p className="text-xs font-black text-[#f97316] whitespace-nowrap">{item.price.toLocaleString()} RWF</p>
+                      </div>
+                    </button>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); toggleWishlist(item); }}
+                      className={`absolute right-6 top-1/2 -translate-y-1/2 p-2 rounded-full transition-all active:scale-75 ${isInWishlist(item.id) ? 'text-red-500' : 'text-gray-300'}`}
+                    >
+                      <Heart className={`w-4 h-4 ${isInWishlist(item.id) ? 'fill-current' : ''}`} />
+                    </button>
+                  </div>
+                ))}
+                <div className="p-6 bg-orange-50/20 border-t border-[#f5f5dc] text-center">
+                  <button 
+                     onClick={navigateToFullMenu}
+                     className="text-[#f97316] text-xs font-black uppercase tracking-widest border-b-2 border-[#f97316]/20 pb-1 active:scale-95 transition-transform inline-flex items-center gap-2"
+                  >
+                     Click here to view full menu <ChevronRight className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="p-10 text-center space-y-5">
+                <div className="w-14 h-14 bg-gray-50 rounded-full flex items-center justify-center mx-auto border-2 border-dashed border-gray-100">
+                   <Search className="w-6 h-6 text-gray-200" />
+                </div>
+                <div className="space-y-2">
+                   <p className="text-sm text-gray-400 italic">"No bites found for that search. Try something else?"</p>
+                   <button 
+                     onClick={navigateToFullMenu}
+                     className="text-[#f97316] text-xs font-black uppercase tracking-widest border-b-2 border-[#f97316]/20 pb-1 mt-2 active:scale-95 transition-transform inline-block"
+                   >
+                     Click here to view full menu
+                   </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </section>
 
       {/* Category Shortcuts */}
@@ -104,8 +235,9 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart 
       <section className="px-4 space-y-5">
         <div className="flex items-center justify-between">
           <h3 className="text-xl font-serif flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-[#f97316]" />
+            <Sparkles className="w-5 h-5 text-yellow-400 animate-pulse" />
             Barista's Choice
+            <Sparkles className="w-3 h-3 text-yellow-400/40 animate-pulse" />
           </h3>
           <span className="text-[9px] text-[#f97316] font-black uppercase tracking-widest">Masterfully Crafted</span>
         </div>
@@ -114,10 +246,9 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart 
           {baristaChoices.map((item) => (
             <div 
               key={item.id} 
-              onClick={() => setCustomizingItem(item)}
-              className="min-w-[280px] bg-white rounded-[40px] shadow-lg border border-[#f97316]/10 overflow-hidden flex flex-col group active:scale-[0.98] transition-all cursor-pointer hover:shadow-2xl hover:-translate-y-1"
+              className="min-w-[280px] bg-white rounded-[40px] shadow-lg border border-[#f97316]/10 overflow-hidden flex flex-col group active:scale-[0.98] transition-all relative hover:shadow-2xl hover:-translate-y-1"
             >
-              <div className="h-44 relative overflow-hidden">
+              <div className="h-44 relative overflow-hidden" onClick={() => setCustomizingItem(item)}>
                 <img 
                   src={item.category === 'Café Signature Cocktails' 
                     ? "https://images.unsplash.com/photo-1545438102-799c3991ffb2?auto=format&fit=crop&q=80&w=400" 
@@ -134,10 +265,17 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart 
                   {item.price.toLocaleString()} RWF
                 </div>
               </div>
+
+              <button 
+                onClick={(e) => { e.stopPropagation(); toggleWishlist(item); }}
+                className={`absolute top-4 right-4 p-2.5 rounded-full backdrop-blur-md transition-all active:scale-75 z-10 ${isInWishlist(item.id) ? 'bg-red-500 text-white shadow-lg' : 'bg-white/40 text-white hover:bg-white/60'}`}
+              >
+                <Heart className={`w-4 h-4 ${isInWishlist(item.id) ? 'fill-current' : ''}`} />
+              </button>
               
-              <div className="p-6 space-y-3 flex-1 flex flex-col">
+              <div className="p-6 space-y-3 flex-1 flex flex-col" onClick={() => setCustomizingItem(item)}>
                 <div className="flex-1">
-                  <h4 className="text-lg font-serif text-[#3e2723] line-clamp-1">{item.name}</h4>
+                  <h4 className="text-lg font-serif text-[#3e2723] line-clamp-1 uppercase">{item.name}</h4>
                   <p className="text-sm text-[#3e2723]/60 italic line-clamp-2 mt-2 leading-relaxed">
                     "{item.description}"
                   </p>
@@ -152,41 +290,6 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart 
         </div>
       </section>
 
-      {/* Personalized Quick Reorder Section */}
-      <section className="px-4">
-        <div className="bg-[#f5f5dc]/40 rounded-[32px] p-6 space-y-4 border border-[#f5f5dc]">
-          <div className="flex items-center justify-between">
-            <h4 className="text-[#3e2723] font-serif text-lg flex items-center gap-2">
-              <History className="w-5 h-5 text-[#f97316]" /> {recentOrdersData.title}
-            </h4>
-            <span className="text-[9px] text-[#3e2723]/40 font-bold uppercase tracking-widest italic">Personalized for you</span>
-          </div>
-          <p className="text-xs text-[#3e2723]/70 font-medium italic leading-relaxed">
-            "{recentOrdersData.message}"
-          </p>
-          <div className="grid grid-cols-2 gap-3">
-            {recentOrdersData.items.map(item => (
-              <button 
-                key={item.id}
-                onClick={() => setCustomizingItem(item)}
-                className="bg-white p-4 rounded-2xl shadow-sm border border-[#f5f5dc] flex flex-col items-start gap-2 active:scale-95 transition-all text-left group"
-              >
-                <div className="flex items-center justify-between w-full">
-                   <div className="p-1.5 bg-[#f5f5dc] rounded-lg group-hover:bg-[#f97316] group-hover:text-white transition-colors">
-                      {CATEGORY_ICONS[item.category] || <Plus className="w-3 h-3" />}
-                   </div>
-                   <Plus className="w-4 h-4 text-[#f97316]" />
-                </div>
-                <div>
-                  <span className="text-[11px] font-bold text-[#3e2723] line-clamp-1">{item.name}</span>
-                  <span className="text-[10px] text-[#f97316] font-bold">{item.price.toLocaleString()} RWF</span>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-      </section>
-
       {/* Featured Items Carousel */}
       <section className="px-4">
         <h3 className="text-xl font-serif mb-5">Today's Specials</h3>
@@ -194,10 +297,9 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart 
           {featured.map((item) => (
             <div 
               key={item.id} 
-              onClick={() => setCustomizingItem(item)}
-              className="min-w-[280px] bg-white rounded-[40px] shadow-xl border border-[#f5f5dc]/50 overflow-hidden flex flex-col cursor-pointer active:scale-[0.98] transition-all hover:-translate-y-1"
+              className="min-w-[280px] bg-white rounded-[40px] shadow-xl border border-[#f5f5dc]/50 overflow-hidden flex flex-col relative active:scale-[0.98] transition-all hover:-translate-y-1"
             >
-              <div className="h-44 relative">
+              <div className="h-44 relative" onClick={() => setCustomizingItem(item)}>
                 <img src={`https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&q=80&w=400`} className="w-full h-full object-cover" alt={item.name} />
                 <div className="absolute top-4 right-4 bg-white/95 backdrop-blur-md px-4 py-1.5 rounded-full text-[#f97316] font-black text-xs shadow-lg">
                   {item.price.toLocaleString()} RWF
@@ -208,8 +310,16 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart 
                   </div>
                 )}
               </div>
-              <div className="p-6 flex-1 flex flex-col">
-                <h4 className="text-xl font-serif text-[#3e2723] mb-2">{item.name}</h4>
+
+              <button 
+                onClick={(e) => { e.stopPropagation(); toggleWishlist(item); }}
+                className={`absolute top-4 left-4 p-2.5 rounded-full backdrop-blur-md transition-all active:scale-75 z-10 ${isInWishlist(item.id) ? 'bg-red-500 text-white shadow-lg' : 'bg-white/40 text-white hover:bg-white/60'}`}
+              >
+                <Heart className={`w-4 h-4 ${isInWishlist(item.id) ? 'fill-current' : ''}`} />
+              </button>
+
+              <div className="p-6 flex-1 flex flex-col" onClick={() => setCustomizingItem(item)}>
+                <h4 className="text-xl font-serif text-[#3e2723] mb-2 uppercase">{item.name}</h4>
                 <p className="text-[#3e2723]/60 text-[11px] line-clamp-3 leading-relaxed flex-1 italic">
                   "{item.description}"
                 </p>
@@ -222,9 +332,67 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart 
         </div>
       </section>
 
+      {/* Recently Ordered Section */}
+      <section className="px-4">
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="text-xl font-serif flex items-center gap-2">
+            <History className="w-5 h-5 text-[#f97316]" />
+            Back for Seconds?
+          </h3>
+          <span className="text-[9px] text-gray-400 font-black uppercase tracking-widest">Recent Cravings</span>
+        </div>
+
+        {recentItems.length > 0 ? (
+          <div className="flex gap-4 overflow-x-auto no-scrollbar pb-6 -mx-1 px-1">
+            {recentItems.map((item) => (
+              <div 
+                key={`recent-${item.id}`} 
+                className="min-w-[200px] bg-white rounded-[32px] shadow-md border border-[#f5f5dc] overflow-hidden flex flex-col relative active:scale-[0.98] transition-all"
+                onClick={() => setCustomizingItem(item)}
+              >
+                <div className="h-28 relative bg-[#f5f5dc] flex items-center justify-center text-[#f97316]">
+                  {CATEGORY_ICONS[item.category] || <Utensils className="w-8 h-8" />}
+                  <div className="absolute top-2 right-2 bg-white/90 px-2 py-0.5 rounded-full text-[8px] font-black text-[#f97316] shadow-sm">
+                    {item.price.toLocaleString()} RWF
+                  </div>
+                </div>
+                <div className="p-4 flex flex-col flex-1">
+                  <h4 className="text-xs font-bold text-[#3e2723] font-serif uppercase line-clamp-1">{item.name}</h4>
+                  <p className="text-[9px] text-[#3e2723]/40 mt-1 line-clamp-1 italic">"{item.category}"</p>
+                  <button 
+                    className="mt-3 w-full bg-[#f97316]/10 text-[#f97316] py-2 rounded-xl text-[8px] font-black uppercase tracking-widest flex items-center justify-center gap-1.5"
+                  >
+                    <Plus className="w-2.5 h-2.5" /> Reorder
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="bg-[#f5f5dc]/30 rounded-[40px] p-10 text-center border-2 border-dashed border-[#f5f5dc] space-y-4 animate-in zoom-in-95 duration-500">
+            <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center text-[#f97316] mx-auto shadow-sm">
+              <ShoppingBag className="w-7 h-7" />
+            </div>
+            <div className="space-y-1">
+              <h4 className="text-lg font-serif">Empty Cravings?</h4>
+              <p className="text-[#3e2723]/50 text-[11px] leading-relaxed italic px-4">
+                "Your future favorites are waiting to be discovered! Start your flavor journey today."
+              </p>
+            </div>
+            <button 
+              onClick={() => onCategorySelect("Signature Meals")}
+              className="text-[#f97316] text-[10px] font-black uppercase tracking-[0.2em] border-b-2 border-[#f97316]/20 pb-1"
+            >
+              Discover the Menu
+            </button>
+          </div>
+        )}
+      </section>
+
+      {/* Floating WhatsApp Button */}
       <a 
         href={`https://wa.me/${CONTACT_INFO.whatsapp}?text=Hello Kuci! I'd like to place an order.`}
-        className="fixed bottom-24 right-6 z-50 bg-[#25D366] text-white p-5 rounded-full shadow-2xl flex items-center justify-center animate-bounce hover:scale-110 active:scale-90 transition-all border-4 border-white"
+        className="fixed bottom-24 right-6 z-30 bg-[#25D366] text-white p-5 rounded-full shadow-2xl flex items-center justify-center animate-bounce hover:scale-110 active:scale-90 transition-all border-4 border-white"
         target="_blank"
         rel="noopener noreferrer"
       >

@@ -1,23 +1,43 @@
 
-import React, { useState } from 'react';
-import { X, Check, Utensils, Pizza as PizzaIcon, Edit3, MessageSquare, Info } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Check, Utensils, Pizza as PizzaIcon, Edit3, MessageSquare, Info, CheckCircle2, Cherry } from 'lucide-react';
 import { CUSTOMIZATION_OPTIONS, EXTRA_COSTS, ACCOMPANIMENTS_NOTE } from '../constants';
 import { MenuItem, ItemCustomization } from '../types';
 
 interface CustomizerModalProps {
   item: MenuItem | null;
+  initialCustomization?: ItemCustomization;
   onClose: () => void;
   onConfirm: (item: MenuItem, customization: ItemCustomization) => void;
 }
 
-export const CustomizerModal: React.FC<CustomizerModalProps> = ({ item, onClose, onConfirm }) => {
-  if (!item) return null;
-
+export const CustomizerModal: React.FC<CustomizerModalProps> = ({ item, initialCustomization, onClose, onConfirm }) => {
   const [selectedSides, setSelectedSides] = useState<string[]>([]);
   const [selectedToppings, setSelectedToppings] = useState<string[]>([]);
   const [extra1, setExtra1] = useState("");
   const [extra2, setExtra2] = useState("");
   const [instructions, setInstructions] = useState("");
+  const [isSuccess, setIsSuccess] = useState(false);
+
+  // Pre-fill state if initialCustomization is provided
+  useEffect(() => {
+    if (item && initialCustomization) {
+      setSelectedSides(initialCustomization.sides || []);
+      setSelectedToppings(initialCustomization.toppings || []);
+      setExtra1(initialCustomization.extras?.[0] || "");
+      setExtra2(initialCustomization.extras?.[1] || "");
+      setInstructions(initialCustomization.instructions || "");
+    } else {
+      // Reset if no initial customization
+      setSelectedSides([]);
+      setSelectedToppings([]);
+      setExtra1("");
+      setExtra2("");
+      setInstructions("");
+    }
+  }, [item, initialCustomization]);
+
+  if (!item) return null;
 
   const toggleSide = (side: string) => {
     setSelectedSides(prev => {
@@ -39,15 +59,21 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({ item, onClose,
     (extraCount * EXTRA_COSTS.OTHER_EXTRA);
 
   const handleConfirm = () => {
-    const extras = [extra1, extra2].filter(e => e.trim().length > 0);
-    const customization: ItemCustomization = {
-      sides: selectedSides.length > 0 ? selectedSides : undefined,
-      toppings: selectedToppings.length > 0 ? selectedToppings : undefined,
-      extras: extras.length > 0 ? extras : undefined,
-      instructions: instructions.trim().length > 0 ? instructions : undefined,
-      extraCost: currentExtraCost
-    };
-    onConfirm(item, customization);
+    // Visual feedback before closing
+    setIsSuccess(true);
+    
+    setTimeout(() => {
+      const extras = [extra1, extra2].filter(e => e.trim().length > 0);
+      const customization: ItemCustomization = {
+        sides: selectedSides.length > 0 ? selectedSides : undefined,
+        toppings: selectedToppings.length > 0 ? selectedToppings : undefined,
+        extras: extras.length > 0 ? extras : undefined,
+        instructions: instructions.trim().length > 0 ? instructions : undefined,
+        extraCost: currentExtraCost
+      };
+      onConfirm(item, customization);
+      setIsSuccess(false);
+    }, 450);
   };
 
   // Compute placeholder image based on category for the detail view
@@ -56,6 +82,8 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({ item, onClose,
     if (item.category === 'Coffee & Espresso' || item.category === 'Iced Espresso & Coffee') return "https://images.unsplash.com/photo-1509042239860-f550ce710b93?auto=format&fit=crop&q=80&w=800";
     if (item.category === 'Kuci Pizza') return "https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&q=80&w=800";
     if (item.category === 'Kuci Burgers') return "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&q=80&w=800";
+    if (item.name === 'PANCAKES & WAFFLES') return "https://images.unsplash.com/photo-1528207776546-365bb710ee93?auto=format&fit=crop&q=80&w=800";
+    if (item.name === 'BREAKFAST BURRITO') return "https://images.unsplash.com/photo-1626700051175-6818013e1d4f?auto=format&fit=crop&q=80&w=800";
     return "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&q=80&w=800";
   };
 
@@ -152,6 +180,68 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({ item, onClose,
               </div>
             )}
 
+            {/* Pancakes & Waffles Toppings */}
+            {item.name === "PANCAKES & WAFFLES" && (
+              <div className="space-y-5">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-lg font-serif flex items-center gap-3">
+                     <div className="w-8 h-8 rounded-xl bg-orange-100 flex items-center justify-center text-[#f97316]">
+                      <Cherry className="w-4 h-4" />
+                    </div>
+                    Toppings
+                  </h4>
+                  <span className="text-[10px] font-black text-[#f97316] uppercase tracking-widest">Select Toppings</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2.5">
+                  {CUSTOMIZATION_OPTIONS.BREAKFAST_TOPPINGS.map(topping => (
+                    <button
+                      key={topping}
+                      onClick={() => toggleTopping(topping)}
+                      className={`px-4 py-4 rounded-2xl text-[10px] font-black uppercase tracking-tighter border-2 transition-all flex items-center justify-between shadow-sm ${
+                        selectedToppings.includes(topping)
+                          ? 'bg-[#3e2723] text-white border-[#3e2723] scale-[1.02]'
+                          : 'bg-white text-[#3e2723]/40 border-[#f5f5dc]'
+                      }`}
+                    >
+                      {topping}
+                      {selectedToppings.includes(topping) && <Check className="w-3 h-3" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Burrito Fillings */}
+            {item.name === "BREAKFAST BURRITO" && (
+              <div className="space-y-5">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-lg font-serif flex items-center gap-3">
+                     <div className="w-8 h-8 rounded-xl bg-orange-100 flex items-center justify-center text-[#f97316]">
+                      <Utensils className="w-4 h-4" />
+                    </div>
+                    Fillings
+                  </h4>
+                  <span className="text-[10px] font-black text-[#f97316] uppercase tracking-widest">Add Fillings</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2.5">
+                  {CUSTOMIZATION_OPTIONS.BURRITO_FILLINGS.map(filling => (
+                    <button
+                      key={filling}
+                      onClick={() => toggleTopping(filling)}
+                      className={`px-4 py-4 rounded-2xl text-[10px] font-black uppercase tracking-tighter border-2 transition-all flex items-center justify-between shadow-sm ${
+                        selectedToppings.includes(filling)
+                          ? 'bg-[#3e2723] text-white border-[#3e2723] scale-[1.02]'
+                          : 'bg-white text-[#3e2723]/40 border-[#f5f5dc]'
+                      }`}
+                    >
+                      {filling}
+                      {selectedToppings.includes(filling) && <Check className="w-3 h-3" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Pizza Toppings */}
             {item.category === "Kuci Pizza" && (
               <div className="space-y-5">
@@ -240,12 +330,20 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({ item, onClose,
         <footer className="p-8 bg-white border-t border-[#f5f5dc] sticky bottom-0 z-10 safe-bottom">
           <button 
             onClick={handleConfirm}
-            className="w-full bg-[#f97316] text-white py-6 rounded-[32px] font-black uppercase tracking-[0.2em] shadow-2xl shadow-orange-200 flex items-center justify-between px-10 text-xs active:scale-95 transition-all"
+            className={`w-full py-6 rounded-[32px] font-black uppercase tracking-[0.2em] shadow-2xl flex items-center justify-between px-10 text-xs active:scale-95 transition-all ${isSuccess ? 'bg-[#25D366] text-white' : 'bg-[#f97316] text-white shadow-orange-200'}`}
           >
-            <span className="flex items-center gap-2">Add to Order</span>
-            <span className="font-serif text-2xl border-l border-white/20 pl-8">
-              {(item.price + currentExtraCost).toLocaleString()} RWF
-            </span>
+            {isSuccess ? (
+              <span className="flex items-center gap-3 mx-auto animate-in zoom-in duration-300">
+                <CheckCircle2 className="w-6 h-6" /> Item Updated!
+              </span>
+            ) : (
+              <>
+                <span className="flex items-center gap-2">{initialCustomization ? 'Save Changes' : 'Add to Order'}</span>
+                <span className="font-serif text-2xl border-l border-white/20 pl-8">
+                  {(item.price + currentExtraCost).toLocaleString()} RWF
+                </span>
+              </>
+            )}
           </button>
         </footer>
       </div>

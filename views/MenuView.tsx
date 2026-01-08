@@ -1,12 +1,14 @@
 
 import React, { useState, useMemo } from 'react';
-import { Plus, Info } from 'lucide-react';
+import { Plus, Info, Heart } from 'lucide-react';
 import { MENU_ITEMS, CATEGORY_ICONS } from '../constants';
 import { Category, MenuItem, ItemCustomization } from '../types';
 import { CustomizerModal } from '../components/CustomizerModal';
 
 interface MenuViewProps {
   addToCart: (item: MenuItem, customization?: ItemCustomization) => void;
+  wishlist: MenuItem[];
+  toggleWishlist: (item: MenuItem) => void;
 }
 
 const CATEGORIES: Category[] = [
@@ -18,7 +20,7 @@ const CATEGORIES: Category[] = [
   "Iced Espresso & Coffee", "Kuci Breakfast", "Coffee & Espresso"
 ];
 
-export const MenuView: React.FC<MenuViewProps> = ({ addToCart }) => {
+export const MenuView: React.FC<MenuViewProps> = ({ addToCart, wishlist, toggleWishlist }) => {
   const [selectedCategory, setSelectedCategory] = useState<Category>(CATEGORIES[0]);
   const [customizingItem, setCustomizingItem] = useState<MenuItem | null>(null);
 
@@ -30,6 +32,8 @@ export const MenuView: React.FC<MenuViewProps> = ({ addToCart }) => {
     addToCart(item, customization);
     setCustomizingItem(null);
   };
+
+  const isInWishlist = (id: string) => wishlist.some(i => i.id === id);
 
   return (
     <div className="flex flex-col h-full animate-in fade-in duration-500">
@@ -71,7 +75,7 @@ export const MenuView: React.FC<MenuViewProps> = ({ addToCart }) => {
           {filteredItems.map((item) => (
             <div 
               key={item.id} 
-              className="bg-white rounded-3xl p-4 shadow-sm border border-[#f5f5dc] flex flex-col gap-3 group active:scale-[0.98] transition-transform"
+              className="bg-white rounded-3xl p-4 shadow-sm border border-[#f5f5dc] flex flex-col gap-3 group active:scale-[0.98] transition-transform relative"
             >
               <div className="flex justify-between items-start gap-4">
                 <div className="flex-1">
@@ -82,10 +86,16 @@ export const MenuView: React.FC<MenuViewProps> = ({ addToCart }) => {
                     </p>
                   )}
                 </div>
-                <div className="text-right">
+                <div className="flex flex-col items-end gap-2">
                   <span className="font-bold text-[#f97316] whitespace-nowrap">
                     {item.price.toLocaleString()} RWF
                   </span>
+                  <button 
+                    onClick={() => toggleWishlist(item)}
+                    className={`p-2 rounded-full transition-all active:scale-75 ${isInWishlist(item.id) ? 'text-red-500 bg-red-50' : 'text-gray-300 bg-gray-50'}`}
+                  >
+                    <Heart className={`w-4 h-4 ${isInWishlist(item.id) ? 'fill-current' : ''}`} />
+                  </button>
                 </div>
               </div>
 
@@ -102,7 +112,7 @@ export const MenuView: React.FC<MenuViewProps> = ({ addToCart }) => {
 
               <button 
                 onClick={() => setCustomizingItem(item)}
-                className="mt-2 w-full flex items-center justify-center gap-2 bg-[#3e2723] text-white py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all hover:bg-[#3e2723]/90 active:bg-[#f97316] shadow-sm"
+                className="mt-2 w-full flex items-center justify-center gap-2 bg-[#3e2723] text-white py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all hover:bg-[#3e2723]/90 active:bg-[#f97316] active:scale-95 hover:scale-[1.01] shadow-sm animate-in slide-in-from-bottom-2 duration-300"
               >
                 <Plus className="w-4 h-4" />
                 Add to Order

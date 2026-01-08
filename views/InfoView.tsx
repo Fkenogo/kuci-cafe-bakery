@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { MapPin, Clock, Phone, MessageCircle, Wallet, ShieldCheck, Heart, Navigation, Truck, Info as InfoIcon } from 'lucide-react';
+import { MapPin, Clock, Phone, MessageCircle, Wallet, ShieldCheck, Heart, Navigation, Truck, Info as InfoIcon, ExternalLink } from 'lucide-react';
 import { CONTACT_INFO, DELIVERY_OPTIONS } from '../constants';
 import { DeliveryArea } from '../types';
 
@@ -8,8 +8,8 @@ export const InfoView: React.FC = () => {
   const [activeZone, setActiveZone] = useState<DeliveryArea>(DeliveryArea.NYAMATA_CENTRAL);
 
   const zones = [
-    { area: DeliveryArea.NYAMATA_CENTRAL, fee: 500, time: "30-45 mins", radius: "w-24 h-24", opacity: "bg-[#f97316]/20" },
-    { area: DeliveryArea.WITHIN_5KM, fee: 1000, time: "45-60 mins", radius: "w-48 h-48", opacity: "bg-[#f97316]/10" }
+    { area: DeliveryArea.NYAMATA_CENTRAL, fee: 500, time: "30-45 mins" },
+    { area: DeliveryArea.WITHIN_5KM, fee: 1000, time: "45-60 mins" }
   ];
 
   return (
@@ -23,68 +23,81 @@ export const InfoView: React.FC = () => {
         </div>
       </header>
 
-      {/* Interactive Delivery Map */}
+      {/* Delivery Map Section */}
       <section className="space-y-6">
         <div className="flex items-center justify-between px-2">
           <h3 className="text-xl font-serif">Delivery Map</h3>
           <span className="text-[10px] text-[#f97316] font-black uppercase tracking-widest flex items-center gap-1">
-            <Truck className="w-3 h-3" /> Area Coverage
+            <Truck className="w-3 h-3" /> Delivery Zones
           </span>
         </div>
 
-        <div className="bg-white rounded-[40px] border border-[#f5f5dc] p-8 shadow-sm flex flex-col items-center">
-          {/* Visual Map Diagram */}
-          <div className="relative w-64 h-64 flex items-center justify-center mb-8">
-            {/* Zone 2 Ring */}
-            <div 
-              onClick={() => setActiveZone(DeliveryArea.WITHIN_5KM)}
-              className={`absolute rounded-full border-2 border-dashed border-[#f97316]/20 transition-all duration-500 cursor-pointer ${
-                activeZone === DeliveryArea.WITHIN_5KM ? 'w-56 h-56 bg-[#f97316]/10 border-solid scale-105' : 'w-48 h-48'
-              }`}
-            />
-            
-            {/* Zone 1 Ring */}
-            <div 
-              onClick={() => setActiveZone(DeliveryArea.NYAMATA_CENTRAL)}
-              className={`absolute rounded-full border-2 border-[#f97316]/30 transition-all duration-500 cursor-pointer flex items-center justify-center ${
-                activeZone === DeliveryArea.NYAMATA_CENTRAL ? 'w-32 h-32 bg-[#f97316]/20 shadow-lg scale-110' : 'w-24 h-24'
-              }`}
+        <div className="bg-white rounded-[40px] border border-[#f5f5dc] overflow-hidden shadow-sm flex flex-col">
+          {/* Linked Street View Area */}
+          <div className="relative h-72 w-full group cursor-pointer overflow-hidden">
+            <a 
+              href={CONTACT_INFO.mapLink} 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="block w-full h-full"
             >
-               <div className="text-[8px] font-black text-[#f97316] uppercase text-center leading-none">
-                 Central<br/>Nyamata
-               </div>
-            </div>
+              {/* Branded Background representing the Cafe Environment */}
+              <div className="absolute inset-0 bg-[#f5f5dc] flex items-center justify-center">
+                 <img 
+                    src="https://images.unsplash.com/photo-1554118811-1e0d58224f24?auto=format&fit=crop&q=80&w=1200" 
+                    alt="KUCI Cafe Environment" 
+                    className="w-full h-full object-cover opacity-90 transition-transform duration-700 group-hover:scale-110"
+                 />
+                 <div className="absolute inset-0 bg-black/10" />
+                 
+                 {/* The Branded Pinned Location - Anchored to the center as a focus point */}
+                 <div className="relative flex flex-col items-center animate-bounce-slow z-10">
+                    <div className="bg-[#3e2723] p-4 rounded-3xl shadow-2xl text-white border-4 border-white relative">
+                       <MapPin className="w-8 h-8" />
+                    </div>
+                    <div className="bg-[#3e2723] text-white text-[9px] font-black px-4 py-2 rounded-full shadow-xl mt-2 uppercase tracking-widest whitespace-nowrap border border-white/20">
+                       KUCI Café & Bakery
+                    </div>
+                    <div className="w-6 h-2 bg-black/40 rounded-full blur-[2px] mt-1" />
+                 </div>
+              </div>
 
-            {/* Core Location */}
-            <div className="z-10 bg-[#3e2723] p-3 rounded-2xl shadow-xl text-white animate-pulse">
-              <MapPin className="w-6 h-6" />
-            </div>
-
-            {/* Zone Label Tooltip */}
-            <div className="absolute -bottom-4 bg-[#3e2723] text-white text-[9px] font-black px-4 py-2 rounded-full shadow-lg uppercase tracking-widest">
-              {activeZone} Area
-            </div>
+              {/* Action Overlay Button - Pill shape interface */}
+              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20">
+                 <div className="bg-white px-6 py-4 rounded-full shadow-2xl flex items-center gap-3 border border-gray-100 min-w-[240px] justify-center active:scale-95 transition-transform">
+                    <Navigation className="w-5 h-5 text-[#f97316]" />
+                    <span className="text-[11px] font-black text-[#3e2723] uppercase tracking-widest">Open in Google Maps</span>
+                    <ExternalLink className="w-3 h-3 text-gray-300 ml-1" />
+                 </div>
+              </div>
+            </a>
           </div>
 
           {/* Zone Selector Cards */}
-          <div className="grid grid-cols-2 gap-3 w-full">
-            {zones.map((zone) => (
-              <button
-                key={zone.area}
-                onClick={() => setActiveZone(zone.area)}
-                className={`p-4 rounded-3xl border-2 transition-all text-left space-y-1 ${
-                  activeZone === zone.area 
-                    ? 'border-[#f97316] bg-[#f97316]/5 shadow-sm' 
-                    : 'border-[#f5f5dc] bg-white'
-                }`}
-              >
-                <p className="text-[10px] font-black text-[#3e2723] uppercase tracking-tighter line-clamp-1">{zone.area}</p>
-                <p className="text-lg font-serif text-[#f97316]">{zone.fee} RWF</p>
-                <div className="flex items-center gap-1 text-[8px] font-bold text-[#3e2723]/40 uppercase">
-                  <Clock className="w-2.5 h-2.5" /> {zone.time}
-                </div>
-              </button>
-            ))}
+          <div className="p-6 bg-white space-y-4">
+            <div className="flex items-center justify-between mb-2 px-2">
+               <h4 className="text-[10px] font-black text-[#3e2723]/40 uppercase tracking-[0.2em]">Select Your Area</h4>
+               <p className="text-[10px] font-bold text-[#f97316]">Delivery Pricing</p>
+            </div>
+            <div className="grid grid-cols-2 gap-3 w-full">
+              {zones.map((zone) => (
+                <button
+                  key={zone.area}
+                  onClick={() => setActiveZone(zone.area)}
+                  className={`p-5 rounded-[32px] border-2 transition-all text-left space-y-1 relative overflow-hidden ${
+                    activeZone === zone.area 
+                      ? 'border-[#f97316] bg-[#f97316]/5 shadow-sm scale-[1.02]' 
+                      : 'border-[#f5f5dc] bg-white opacity-60'
+                  }`}
+                >
+                  <p className="text-[10px] font-black text-[#3e2723] uppercase tracking-tighter line-clamp-1">{zone.area}</p>
+                  <p className="text-xl font-serif text-[#f97316]">{zone.fee} RWF</p>
+                  <div className="flex items-center gap-1 text-[8px] font-bold text-[#3e2723]/40 uppercase">
+                    <Clock className="w-2.5 h-2.5" /> {zone.time}
+                  </div>
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </section>
@@ -96,21 +109,21 @@ export const InfoView: React.FC = () => {
             <div className="w-12 h-12 bg-[#f5f5dc] rounded-2xl flex items-center justify-center text-[#f97316] flex-shrink-0">
                <Navigation className="w-6 h-6" />
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1 flex-1">
               <h4 className="font-bold text-[#3e2723] font-serif">Visit Us</h4>
               <p className="text-sm text-gray-500 leading-relaxed">{CONTACT_INFO.location}</p>
               <a 
-                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(CONTACT_INFO.location)}`}
+                href={CONTACT_INFO.mapLink}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-block text-[#f97316] text-[10px] font-bold uppercase tracking-widest mt-2 border-b-2 border-[#f97316]/20 pb-1"
+                className="inline-block text-[#f97316] text-[10px] font-bold uppercase tracking-widest mt-2 border-b-2 border-[#f97316]/20 pb-1 active:scale-95 transition-transform"
               >
-                Get Directions
+                Click Here for Directions
               </a>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-4 border-t border-[#f5f5dc] pt-6">
              <div className="flex flex-col gap-2">
                 <span className="text-[9px] font-black uppercase tracking-[0.2em] text-[#3e2723]/30">Phone</span>
                 <a href={`tel:${CONTACT_INFO.phone}`} className="flex items-center gap-2 text-sm font-bold text-[#3e2723]">
@@ -120,7 +133,7 @@ export const InfoView: React.FC = () => {
              <div className="flex flex-col gap-2">
                 <span className="text-[9px] font-black uppercase tracking-[0.2em] text-[#3e2723]/30">WhatsApp</span>
                 <a href={`https://wa.me/${CONTACT_INFO.whatsapp}`} className="flex items-center gap-2 text-sm font-bold text-[#3e2723]">
-                  <MessageCircle className="w-4 h-4 text-[#25D366]" /> Click to Chat
+                  <MessageCircle className="w-4 h-4 text-[#25D366]" /> Chat With Us
                 </a>
              </div>
           </div>
@@ -163,7 +176,7 @@ export const InfoView: React.FC = () => {
         </div>
       </section>
 
-      {/* Feedback & Story */}
+      {/* Feedback Form */}
       <section className="bg-white rounded-[40px] p-8 shadow-xl border border-[#f5f5dc] space-y-8">
         <div className="text-center space-y-2">
           <h4 className="text-2xl font-serif">Share Your Story</h4>
@@ -188,7 +201,7 @@ export const InfoView: React.FC = () => {
         </form>
       </section>
 
-      {/* Trust & Policy */}
+      {/* Footer */}
       <footer className="text-center space-y-8 pt-4 pb-10">
         <div className="flex flex-col items-center gap-3">
           <ShieldCheck className="w-8 h-8 text-[#f97316] opacity-30" />

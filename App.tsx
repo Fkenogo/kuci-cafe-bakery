@@ -12,6 +12,7 @@ import { CartItem, MenuItem, UserProfile, HistoricalOrder, ItemCustomization } f
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('home');
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [wishlist, setWishlist] = useState<MenuItem[]>([]);
   const [loyaltyPoints, setLoyaltyPoints] = useState(0);
   const [userProfile, setUserProfile] = useState<UserProfile>({ name: '', phone: '' });
   const [orderHistory, setOrderHistory] = useState<HistoricalOrder[]>([]);
@@ -19,11 +20,13 @@ const App: React.FC = () => {
   // Load state from localStorage
   useEffect(() => {
     const savedCart = localStorage.getItem('kuci_cart');
+    const savedWishlist = localStorage.getItem('kuci_wishlist');
     const savedPoints = localStorage.getItem('kuci_loyalty_points');
     const savedUser = localStorage.getItem('kuci_user');
     const savedHistory = localStorage.getItem('kuci_history');
 
     if (savedCart) setCart(JSON.parse(savedCart));
+    if (savedWishlist) setWishlist(JSON.parse(savedWishlist));
     if (savedPoints) setLoyaltyPoints(parseInt(savedPoints, 10));
     if (savedUser) setUserProfile(JSON.parse(savedUser));
     if (savedHistory) setOrderHistory(JSON.parse(savedHistory));
@@ -32,14 +35,14 @@ const App: React.FC = () => {
   // Sync state to localStorage
   useEffect(() => {
     localStorage.setItem('kuci_cart', JSON.stringify(cart));
+    localStorage.setItem('kuci_wishlist', JSON.stringify(wishlist));
     localStorage.setItem('kuci_user', JSON.stringify(userProfile));
     localStorage.setItem('kuci_history', JSON.stringify(orderHistory));
     localStorage.setItem('kuci_loyalty_points', loyaltyPoints.toString());
-  }, [cart, userProfile, orderHistory, loyaltyPoints]);
+  }, [cart, wishlist, userProfile, orderHistory, loyaltyPoints]);
 
   const addToCart = (item: MenuItem, customization?: ItemCustomization) => {
     setCart(prev => {
-      // Find if an identical item (same ID and same customization) exists
       const existingIndex = prev.findIndex(i => {
         if (i.id !== item.id) return false;
         return JSON.stringify(i.customization) === JSON.stringify(customization);
@@ -58,6 +61,25 @@ const App: React.FC = () => {
         instanceId: Math.random().toString(36).substr(2, 9)
       };
       return [...prev, newCartItem];
+    });
+  };
+
+  const updateCartItemCustomization = (instanceId: string, customization: ItemCustomization) => {
+    setCart(prev => prev.map(item => {
+      if (item.instanceId === instanceId) {
+        return { ...item, customization };
+      }
+      return item;
+    }));
+  };
+
+  const toggleWishlist = (item: MenuItem) => {
+    setWishlist(prev => {
+      const exists = prev.find(i => i.id === item.id);
+      if (exists) {
+        return prev.filter(i => i.id !== item.id);
+      }
+      return [...prev, item];
     });
   };
 
@@ -83,12 +105,27 @@ const App: React.FC = () => {
   const reorder = (items: CartItem[]) => {
     setCart(items.map(item => ({...item, instanceId: Math.random().toString(36).substr(2, 9)})));
     setActiveTab('orders');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const renderView = () => {
     switch (activeTab) {
-      case 'home': return <HomeView onCategorySelect={(cat) => setActiveTab('menu')} addToCart={addToCart} />;
-      case 'menu': return <MenuView addToCart={addToCart} />;
+      case 'home': return (
+        <HomeView 
+          onCategorySelect={(cat) => setActiveTab('menu')} 
+          addToCart={addToCart} 
+          wishlist={wishlist}
+          toggleWishlist={toggleWishlist}
+          orderHistory={orderHistory}
+        />
+      );
+      case 'menu': return (
+        <MenuView 
+          addToCart={addToCart} 
+          wishlist={wishlist}
+          toggleWishlist={toggleWishlist}
+        />
+      );
       case 'bakery': return <BakeryView />;
       case 'orders': return (
         <OrdersView 
@@ -100,6 +137,9 @@ const App: React.FC = () => {
           userProfile={userProfile}
           setUserProfile={setUserProfile}
           onOrderComplete={completeOrder}
+          orderHistory={orderHistory}
+          onReorder={reorder}
+          onUpdateCustomization={updateCartItemCustomization}
         />
       );
       case 'info': return <InfoView />;
@@ -110,9 +150,20 @@ const App: React.FC = () => {
           loyaltyPoints={loyaltyPoints}
           orderHistory={orderHistory}
           onReorder={reorder}
+          wishlist={wishlist}
+          toggleWishlist={toggleWishlist}
+          addToCart={addToCart}
         />
       );
-      default: return <HomeView onCategorySelect={() => setActiveTab('menu')} addToCart={addToCart} />;
+      default: return (
+        <HomeView 
+          onCategorySelect={() => setActiveTab('menu')} 
+          addToCart={addToCart} 
+          wishlist={wishlist}
+          toggleWishlist={toggleWishlist}
+          orderHistory={orderHistory}
+        />
+      );
     }
   };
 
