@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import { Plus, Info, Heart } from 'lucide-react';
+import { Plus, Info, Heart, Star } from 'lucide-react';
 import { MENU_ITEMS, CATEGORY_ICONS } from '../constants';
 import { Category, MenuItem, ItemCustomization } from '../types';
 import { CustomizerModal } from '../components/CustomizerModal';
@@ -43,7 +43,6 @@ export const MenuView: React.FC<MenuViewProps> = ({ addToCart, wishlist, toggleW
         onConfirm={handleCustomizationConfirm}
       />
 
-      {/* Sticky Category Filter */}
       <div className="sticky top-16 z-30 bg-[#fffdfa]/95 backdrop-blur-md border-b border-[#f5f5dc] py-4">
         <div className="flex gap-3 overflow-x-auto no-scrollbar px-4">
           {CATEGORIES.map((cat) => (
@@ -62,7 +61,6 @@ export const MenuView: React.FC<MenuViewProps> = ({ addToCart, wishlist, toggleW
         </div>
       </div>
 
-      {/* Menu List */}
       <div className="px-4 py-6 space-y-6">
         <div className="flex items-center gap-3 mb-2">
           <div className="p-2 bg-orange-100 text-[#f97316] rounded-xl">
@@ -79,7 +77,15 @@ export const MenuView: React.FC<MenuViewProps> = ({ addToCart, wishlist, toggleW
             >
               <div className="flex justify-between items-start gap-4">
                 <div className="flex-1">
-                  <h4 className="font-bold text-[#3e2723] text-lg leading-tight uppercase font-serif tracking-tight">{item.name}</h4>
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-bold text-[#3e2723] text-lg leading-tight uppercase font-serif tracking-tight">{item.name}</h4>
+                    {item.averageRating && (
+                      <div className="flex items-center gap-0.5 bg-yellow-50 px-2 py-0.5 rounded-lg border border-yellow-100">
+                        <Star className="w-2.5 h-2.5 text-yellow-500 fill-yellow-500" />
+                        <span className="text-[10px] font-black text-yellow-600">{item.averageRating.toFixed(1)}</span>
+                      </div>
+                    )}
+                  </div>
                   {item.tagline && (
                     <p className="text-[#f97316] text-[10px] font-bold uppercase tracking-widest mt-1">
                       {item.tagline}

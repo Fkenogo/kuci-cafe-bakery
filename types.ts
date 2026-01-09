@@ -25,6 +25,13 @@ export type Category =
   | "Coffee & Espresso"
   | "Bakery & Pastries";
 
+export interface Review {
+  user: string;
+  rating: number;
+  comment: string;
+  date: string;
+}
+
 export interface MenuItem {
   id: string;
   name: string;
@@ -33,6 +40,8 @@ export interface MenuItem {
   category: Category;
   tagline?: string;
   note?: string;
+  reviews?: Review[];
+  averageRating?: number;
 }
 
 export interface ItemCustomization {

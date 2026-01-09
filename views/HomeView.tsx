@@ -1,6 +1,6 @@
 
 import React, { useMemo, useState, useRef, useEffect } from 'react';
-import { Search, ChevronRight, MessageCircle, Sparkles, Clock, Plus, History, X, Utensils, Heart, ShoppingBag, Coffee } from 'lucide-react';
+import { Search, ChevronRight, MessageCircle, Sparkles, Clock, Plus, History, X, Utensils, Heart, ShoppingBag, Coffee, Star } from 'lucide-react';
 import { MENU_ITEMS, CONTACT_INFO, CATEGORY_ICONS } from '../constants';
 import { Category, MenuItem, ItemCustomization, HistoricalOrder } from '../types';
 import { CustomizerModal } from '../components/CustomizerModal';
@@ -26,7 +26,6 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
 
   const isInWishlist = (id: string) => wishlist.some(i => i.id === id);
 
-  // Extract last 4 unique items from order history
   const recentItems = useMemo(() => {
     const items: MenuItem[] = [];
     const seenIds = new Set<string>();
@@ -44,7 +43,6 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
     return items;
   }, [orderHistory]);
 
-  // Dynamic Search Results: Filters by name, description, and category
   const searchResults = useMemo(() => {
     if (!searchQuery.trim()) return [];
     const query = searchQuery.toLowerCase();
@@ -55,7 +53,6 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
     ).slice(0, 8); 
   }, [searchQuery]);
 
-  // Close results when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
@@ -97,7 +94,6 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
         onConfirm={handleCustomizationConfirm}
       />
 
-      {/* Hero Banner */}
       <section className="relative h-72 sm:h-80 overflow-hidden rounded-b-[40px] shadow-2xl">
         <img 
           src="https://images.unsplash.com/photo-1554118811-1e0d58224f24?auto=format&fit=crop&q=80&w=800" 
@@ -113,7 +109,6 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
         </div>
       </section>
 
-      {/* Responsive & Dynamic Search Bar */}
       <section className="px-4 -mt-10 relative z-40" ref={searchRef}>
         <div className="relative group max-w-lg mx-auto">
           <div className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center">
@@ -141,7 +136,6 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
           )}
         </div>
 
-        {/* Live Search Results Dropdown */}
         {showResults && searchQuery.trim() && (
           <div className="absolute top-[110%] left-4 right-4 max-w-lg mx-auto bg-white rounded-[32px] shadow-2xl border border-[#f5f5dc] overflow-hidden animate-in slide-in-from-top-2 duration-300">
             {searchResults.length > 0 ? (
@@ -163,7 +157,15 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
                         {CATEGORY_ICONS[item.category] || <Utensils className="w-5 h-5" />}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <h4 className="text-sm font-bold text-[#3e2723] truncate group-hover:text-[#f97316] transition-colors uppercase font-serif">{item.name}</h4>
+                        <div className="flex items-center gap-2">
+                           <h4 className="text-sm font-bold text-[#3e2723] truncate group-hover:text-[#f97316] transition-colors uppercase font-serif">{item.name}</h4>
+                           {item.averageRating && (
+                             <div className="flex items-center gap-0.5">
+                               <Star className="w-2.5 h-2.5 text-yellow-500 fill-yellow-500" />
+                               <span className="text-[9px] font-black text-gray-400">{item.averageRating.toFixed(1)}</span>
+                             </div>
+                           )}
+                        </div>
                         <p className="text-[9px] text-gray-400 font-bold uppercase tracking-widest">{item.category}</p>
                       </div>
                       <div className="text-right mr-8">
@@ -194,12 +196,6 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
                 </div>
                 <div className="space-y-2">
                    <p className="text-sm text-gray-400 italic">"No bites found for that search. Try something else?"</p>
-                   <button 
-                     onClick={navigateToFullMenu}
-                     className="text-[#f97316] text-xs font-black uppercase tracking-widest border-b-2 border-[#f97316]/20 pb-1 mt-2 active:scale-95 transition-transform inline-block"
-                   >
-                     Click here to view full menu
-                   </button>
                 </div>
               </div>
             )}
@@ -207,7 +203,6 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
         )}
       </section>
 
-      {/* Category Shortcuts */}
       <section className="px-4">
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-xl font-serif">Browse Menu</h3>
@@ -231,13 +226,11 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
         </div>
       </section>
 
-      {/* Barista's Choice */}
       <section className="px-4 space-y-5">
         <div className="flex items-center justify-between">
           <h3 className="text-xl font-serif flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-yellow-400 animate-pulse" />
             Barista's Choice
-            <Sparkles className="w-3 h-3 text-yellow-400/40 animate-pulse" />
           </h3>
           <span className="text-[9px] text-[#f97316] font-black uppercase tracking-widest">Masterfully Crafted</span>
         </div>
@@ -261,6 +254,12 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
                 <div className="absolute top-4 left-4 bg-[#f97316] text-white px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest">
                   {item.category.replace('Café ', '')}
                 </div>
+                {item.averageRating && (
+                  <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur-sm px-3 py-1 rounded-full flex items-center gap-1 shadow-lg">
+                    <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
+                    <span className="text-[10px] font-black text-[#3e2723]">{item.averageRating.toFixed(1)}</span>
+                  </div>
+                )}
                 <div className="absolute bottom-4 right-4 bg-white/95 backdrop-blur-md px-3 py-1.5 rounded-full text-[#3e2723] font-black text-xs shadow-md">
                   {item.price.toLocaleString()} RWF
                 </div>
@@ -290,7 +289,6 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
         </div>
       </section>
 
-      {/* Featured Items Carousel */}
       <section className="px-4">
         <h3 className="text-xl font-serif mb-5">Today's Specials</h3>
         <div className="flex gap-6 overflow-x-auto no-scrollbar pb-6 -mx-1 px-1">
@@ -304,6 +302,12 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
                 <div className="absolute top-4 right-4 bg-white/95 backdrop-blur-md px-4 py-1.5 rounded-full text-[#f97316] font-black text-xs shadow-lg">
                   {item.price.toLocaleString()} RWF
                 </div>
+                {item.averageRating && (
+                  <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-[#f97316] px-3 py-1 rounded-full flex items-center gap-1 shadow-xl">
+                    <Star className="w-3 h-3 text-white fill-white" />
+                    <span className="text-[10px] font-black text-white">{item.averageRating.toFixed(1)}</span>
+                  </div>
+                )}
                 {item.tagline && (
                   <div className="absolute bottom-4 left-4 bg-[#f97316]/90 backdrop-blur-sm px-3 py-1 rounded-lg text-white font-bold text-[8px] uppercase tracking-[0.2em]">
                     {item.tagline}
@@ -332,7 +336,6 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
         </div>
       </section>
 
-      {/* Recently Ordered Section */}
       <section className="px-4">
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-xl font-serif flex items-center gap-2">
@@ -357,7 +360,15 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
                   </div>
                 </div>
                 <div className="p-4 flex flex-col flex-1">
-                  <h4 className="text-xs font-bold text-[#3e2723] font-serif uppercase line-clamp-1">{item.name}</h4>
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold text-[#3e2723] font-serif uppercase line-clamp-1">{item.name}</h4>
+                    {item.averageRating && (
+                      <div className="flex items-center gap-0.5 ml-1">
+                        <Star className="w-2.5 h-2.5 text-yellow-500 fill-yellow-500" />
+                        <span className="text-[8px] font-black text-gray-400">{item.averageRating.toFixed(1)}</span>
+                      </div>
+                    )}
+                  </div>
                   <p className="text-[9px] text-[#3e2723]/40 mt-1 line-clamp-1 italic">"{item.category}"</p>
                   <button 
                     className="mt-3 w-full bg-[#f97316]/10 text-[#f97316] py-2 rounded-xl text-[8px] font-black uppercase tracking-widest flex items-center justify-center gap-1.5"
@@ -376,20 +387,13 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
             <div className="space-y-1">
               <h4 className="text-lg font-serif">Empty Cravings?</h4>
               <p className="text-[#3e2723]/50 text-[11px] leading-relaxed italic px-4">
-                "Your future favorites are waiting to be discovered! Start your flavor journey today."
+                "Your future favorites are waiting to be discovered!"
               </p>
             </div>
-            <button 
-              onClick={() => onCategorySelect("Signature Meals")}
-              className="text-[#f97316] text-[10px] font-black uppercase tracking-[0.2em] border-b-2 border-[#f97316]/20 pb-1"
-            >
-              Discover the Menu
-            </button>
           </div>
         )}
       </section>
 
-      {/* Floating WhatsApp Button */}
       <a 
         href={`https://wa.me/${CONTACT_INFO.whatsapp}?text=Hello Kuci! I'd like to place an order.`}
         className="fixed bottom-24 right-6 z-30 bg-[#25D366] text-white p-5 rounded-full shadow-2xl flex items-center justify-center animate-bounce hover:scale-110 active:scale-90 transition-all border-4 border-white"

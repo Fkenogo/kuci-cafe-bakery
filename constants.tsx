@@ -116,7 +116,12 @@ export const MENU_ITEMS: MenuItem[] = [
     tagline: 'Our house legend on a plate',
     description: 'Fragrant rice dancing with aromatic spices, crowned with your choice of tender beef or succulent chicken. This is where tradition meets comfort in every forkful.',
     category: 'Signature Meals',
-    note: ACCOMPANIMENTS_NOTE
+    note: ACCOMPANIMENTS_NOTE,
+    averageRating: 4.8,
+    reviews: [
+      { user: "Alice M.", rating: 5, comment: "Best rice I've had in Bugesera! The spices are just right.", date: "12/03/24" },
+      { user: "James K.", rating: 4, comment: "Very flavorful, though the beef was a bit spicy for my kids.", date: "05/03/24" }
+    ]
   },
   {
     id: 'sig-2',
@@ -125,7 +130,24 @@ export const MENU_ITEMS: MenuItem[] = [
     tagline: 'Slow-cooked soul food',
     description: 'Melt-in-your-mouth beef simmered to perfection with garden-fresh tomatoes, peppers, and onions. A hug in a bowl that tastes like home.',
     category: 'Signature Meals',
-    note: ACCOMPANIMENTS_NOTE
+    note: ACCOMPANIMENTS_NOTE,
+    averageRating: 4.5,
+    reviews: [
+      { user: "Robert", rating: 5, comment: "Super tender beef, felt like home cooking.", date: "10/03/24" }
+    ]
+  },
+  {
+    id: 'cf-1',
+    name: 'CAFÉ AU LAIT',
+    price: 2500,
+    tagline: 'French morning hug',
+    description: 'Coffee of the day with steamed milk. Simple elegance in a cup.',
+    category: 'Coffee & Espresso',
+    averageRating: 4.9,
+    reviews: [
+      { user: "Lorraine", rating: 5, comment: "Perfect froth and temperature. A must try!", date: "14/03/24" },
+      { user: "David", rating: 5, comment: "My daily fuel. Best coffee in Nyamata.", date: "11/03/24" }
+    ]
   },
   {
     id: 'sig-3',
@@ -134,7 +156,11 @@ export const MENU_ITEMS: MenuItem[] = [
     tagline: 'A fragrant journey to the spice route',
     description: 'Layers of saffron-kissed rice and tender chicken, infused with secrets from ancient kitchens. Each bite reveals a new flavor waiting to be discovered.',
     category: 'Signature Meals',
-    note: ACCOMPANIMENTS_NOTE
+    note: ACCOMPANIMENTS_NOTE,
+    averageRating: 4.7,
+    reviews: [
+      { user: "Sandra", rating: 5, comment: "The aroma is incredible!", date: "01/03/24" }
+    ]
   },
   {
     id: 'sig-4',
@@ -1008,6 +1034,38 @@ export const MENU_ITEMS: MenuItem[] = [
     description: 'Local treasure, unique taste. Squeezed fresh, served cold.',
     category: 'Fresh Juice'
   },
+  {
+    id: 'ju-11',
+    name: 'PINEAPPLE & MINT',
+    price: 3000,
+    tagline: 'Zesty Herb Duet',
+    description: 'Tropical zing with a refreshing herbal finish. Squeezed fresh to order.',
+    category: 'Fresh Juice'
+  },
+  {
+    id: 'ju-12',
+    name: 'PASSION & GINGER',
+    price: 3500,
+    tagline: 'Spicy Sweet Kick',
+    description: 'A spicy-sweet duet that wakes up the senses. Squeezed fresh, served cold.',
+    category: 'Fresh Juice'
+  },
+  {
+    id: 'ju-13',
+    name: 'BEETROOT & APPLE',
+    price: 4500,
+    tagline: 'The Health Elixir',
+    description: 'Earthy sweetness meeting orchard crispness. A vibrant health boost in every sip.',
+    category: 'Fresh Juice'
+  },
+  {
+    id: 'ju-14',
+    name: 'CARROT & ORANGE',
+    price: 5000,
+    tagline: 'Golden Sunshine',
+    description: 'Liquid sunshine in a glass. Sweet, nutritious, and bright. Squeezed fresh.',
+    category: 'Fresh Juice'
+  },
 
   // COCKTAILS
   {
@@ -1131,6 +1189,30 @@ export const MENU_ITEMS: MenuItem[] = [
     description: 'Stay hydrated with a full litre.',
     category: 'Beverages'
   },
+  {
+    id: 'bv-4',
+    name: 'SPARKLING WATER (500ML)',
+    price: 2000,
+    tagline: 'Effervescent Pureness',
+    description: 'Crisp bubbles to cleanse the palate. Best served chilled.',
+    category: 'Beverages'
+  },
+  {
+    id: 'bv-5',
+    name: 'TONIC WATER',
+    price: 1500,
+    tagline: 'The Perfect Mixer',
+    description: 'The perfect companion or a refreshing solo act. Crisp and bitter-sweet.',
+    category: 'Beverages'
+  },
+  {
+    id: 'bv-6',
+    name: 'GINGER BEER',
+    price: 2500,
+    tagline: 'Non-Alcoholic Spice',
+    description: 'A spicy local favorite with a real kick. Brewed naturally for bold flavor.',
+    category: 'Beverages'
+  },
 
   // SMOOTHIES
   {
@@ -1179,6 +1261,38 @@ export const MENU_ITEMS: MenuItem[] = [
     price: 5000,
     tagline: 'Royal fruit treatment',
     description: 'A premium banana blend with a twist.',
+    category: 'Smoothies'
+  },
+  {
+    id: 'sm-7',
+    name: 'GREEN RECHARGE',
+    price: 5500,
+    tagline: 'Vegan Clean Energy',
+    description: 'Spinach, apple, and banana blended with a coconut water base. Clean energy for the soul. (Vegan)',
+    category: 'Smoothies'
+  },
+  {
+    id: 'sm-8',
+    name: 'PEANUT BUTTER POWER',
+    price: 6000,
+    tagline: 'Creamy Plant Power',
+    description: 'Creamy peanut butter, banana, and almond milk base. Rich, nutty, and entirely plant-based. (Vegan)',
+    category: 'Smoothies'
+  },
+  {
+    id: 'sm-9',
+    name: 'COCO-AVO DREAM',
+    price: 6000,
+    tagline: 'Silky Tropical Treat',
+    description: 'Buttery avocado meeting creamy coconut milk and a hint of lime. A silky tropical masterpiece. (Vegan)',
+    category: 'Smoothies'
+  },
+  {
+    id: 'sm-10',
+    name: 'CHIA SEED SURPRISE',
+    price: 5500,
+    tagline: 'Nutrient Dense Bite',
+    description: 'Mixed berries and soaked chia seeds for a textured, nutrient-dense delight.',
     category: 'Smoothies'
   },
 
@@ -1273,7 +1387,6 @@ export const MENU_ITEMS: MenuItem[] = [
     description: 'Thick, creamy, and dreamy.',
     category: 'Milk Shake'
   },
-  // Fix: Added missing 'category' property and corrected 'description' for 'CARAMEL SHAKE'
   {
     id: 'mk-9',
     name: 'CARAMEL SHAKE',
@@ -1473,14 +1586,6 @@ export const MENU_ITEMS: MenuItem[] = [
   },
 
   // COFFEE & ESPRESSO
-  {
-    id: 'cf-1',
-    name: 'CAFÉ AU LAIT',
-    price: 2500,
-    tagline: 'French morning hug',
-    description: 'Coffee of the day with steamed milk. Simple elegance in a cup.',
-    category: 'Coffee & Espresso'
-  },
   {
     id: 'cf-2',
     name: 'ESPRESSO',
