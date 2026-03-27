@@ -1,0 +1,128 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: settings
+    // Document ID: restaurant
+    // Fields:
+    //   - name: string (required)
+    //   - logo: string (optional)
+    //   - contactInfo: map (required)
+    //   - colors: map (required)
+    //   - extraCosts: map (required)
+    //   - deliveryOptions: map (required)
+    //
+    // Collection: categories
+    // Document ID: auto-generated
+    // Fields:
+    //   - name: string (required)
+    //   - slug: string (required)
+    //   - description: string (optional)
+    //   - sortOrder: number (optional)
+    //   - active: bool (required)
+    //   - iconName: string (optional)
+    //
+    // Collection: menuItems
+    // Document ID: auto-generated
+    // Fields:
+    //   - name: string (required)
+    //   - description: string (optional)
+    //   - tagline: string (optional)
+    //   - price: number (required)
+    //   - currency: string (optional)
+    //   - categoryId: string (required)
+    //   - imageUrl: string (optional)
+    //   - available: bool (required)
+    //   - featured: bool (optional)
+    //   - sortOrder: number (optional)
+    //   - note: string (optional)
+    //   - averageRating: number (optional)
+    //   - reviews: list (optional)
+    //
+    // Collection: users
+    // Document ID: userId
+    // Fields:
+    //   - name: string (required)
+    //   - email: string (required)
+    //   - role: string (required, default 'user')
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "fredkenogo@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['name', 'email', 'role']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.email is string && data.email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$") &&
+             data.role in ['admin', 'user'];
+    }
+
+    function isValidCategory(data) {
+      return data.keys().hasAll(['name', 'slug', 'active']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.slug is string && data.slug.size() > 0 && data.slug.size() < 100 &&
+             data.active is bool;
+    }
+
+    function isValidMenuItem(data) {
+      return data.keys().hasAll(['name', 'price', 'categoryId', 'available']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
+             data.price is number && data.price >= 0 &&
+             data.categoryId is string &&
+             data.available is bool;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    // Publicly readable settings
+    match /settings/restaurant {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Publicly readable categories
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidCategory(request.resource.data);
+    }
+
+    // Publicly readable menu items
+    match /menuItems/{itemId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidMenuItem(request.resource.data);
+    }
+
+    // User profiles
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == 'user';
+      allow update: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == resource.data.role;
+      allow write: if isAdmin();
+    }
+
+    // Default deny
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}

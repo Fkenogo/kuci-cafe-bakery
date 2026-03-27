@@ -16,9 +16,9 @@ export const Button: React.FC<ButtonProps> = ({
   const baseStyles = "px-6 py-3 rounded-full font-semibold transition-all active:scale-95 flex items-center justify-center gap-2";
   
   const variants = {
-    primary: "bg-[#f97316] text-white",
-    secondary: "bg-[#3e2723] text-white",
-    outline: "border-2 border-[#f97316] text-[#f97316]",
+    primary: "bg-[var(--color-primary)] text-white",
+    secondary: "bg-[var(--color-text)] text-white",
+    outline: "border-2 border-[var(--color-primary)] text-[var(--color-primary)]",
     whatsapp: "bg-[#25D366] text-white"
   };
 

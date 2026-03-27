@@ -1,5 +1,6 @@
-
 import React, { useState, useEffect } from 'react';
+import { onAuthStateChanged, User } from 'firebase/auth';
+import { auth } from './lib/firebase';
 import { Layout } from './components/Layout';
 import { HomeView } from './views/HomeView';
 import { MenuView } from './views/MenuView';
@@ -8,6 +9,10 @@ import { OrdersView } from './views/OrdersView';
 import { InfoView } from './views/InfoView';
 import { ProfileView } from './views/ProfileView';
 import { CartItem, MenuItem, UserProfile, HistoricalOrder, ItemCustomization } from './types';
+import { useRestaurantData } from './hooks/useFirestore';
+import { Loading } from './components/Loading';
+import { ErrorView } from './components/Error';
+import { SeedButton } from './components/SeedButton';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('home');
@@ -16,6 +21,21 @@ const App: React.FC = () => {
   const [loyaltyPoints, setLoyaltyPoints] = useState(0);
   const [userProfile, setUserProfile] = useState<UserProfile>({ name: '', phone: '' });
   const [orderHistory, setOrderHistory] = useState<HistoricalOrder[]>([]);
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  const { categories, menuItems, settings, loading: dataLoading, error } = useRestaurantData();
+  
+  // Apply dynamic colors from settings
+  useEffect(() => {
+    if (settings?.colors) {
+      const root = document.documentElement;
+      root.style.setProperty('--color-primary', settings.colors.primary);
+      root.style.setProperty('--color-text', settings.colors.text);
+      root.style.setProperty('--color-bg', settings.colors.bg);
+      root.style.setProperty('--color-bg-secondary', settings.colors.bgSecondary);
+    }
+  }, [settings]);
 
   // Load state from localStorage
   useEffect(() => {
@@ -40,6 +60,22 @@ const App: React.FC = () => {
     localStorage.setItem('kuci_history', JSON.stringify(orderHistory));
     localStorage.setItem('kuci_loyalty_points', loyaltyPoints.toString());
   }, [cart, wishlist, userProfile, orderHistory, loyaltyPoints]);
+
+  // Auth listener
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setAuthLoading(false);
+      if (u) {
+        setUserProfile(prev => ({
+          ...prev,
+          name: u.displayName || prev.name,
+          photo: u.photoURL || prev.photo
+        }));
+      }
+    });
+    return unsub;
+  }, []);
 
   const addToCart = (item: MenuItem, customization?: ItemCustomization) => {
     setCart(prev => {
@@ -108,6 +144,9 @@ const App: React.FC = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  if (authLoading || dataLoading) return <Loading />;
+  if (error) return <ErrorView message={error} onRetry={() => window.location.reload()} />;
+
   const renderView = () => {
     switch (activeTab) {
       case 'home': return (
@@ -117,6 +156,8 @@ const App: React.FC = () => {
           wishlist={wishlist}
           toggleWishlist={toggleWishlist}
           orderHistory={orderHistory}
+          menuItems={menuItems}
+          categories={categories}
         />
       );
       case 'menu': return (
@@ -124,9 +165,16 @@ const App: React.FC = () => {
           addToCart={addToCart} 
           wishlist={wishlist}
           toggleWishlist={toggleWishlist}
+          menuItems={menuItems}
+          categories={categories}
         />
       );
-      case 'bakery': return <BakeryView />;
+      case 'bakery': return (
+        <BakeryView 
+          menuItems={menuItems}
+          categories={categories}
+        />
+      );
       case 'orders': return (
         <OrdersView 
           cart={cart} 
@@ -140,9 +188,10 @@ const App: React.FC = () => {
           orderHistory={orderHistory}
           onReorder={reorder}
           onUpdateCustomization={updateCartItemCustomization}
+          settings={settings}
         />
       );
-      case 'info': return <InfoView />;
+      case 'info': return <InfoView settings={settings} />;
       case 'profile': return (
         <ProfileView 
           userProfile={userProfile} 
@@ -153,6 +202,7 @@ const App: React.FC = () => {
           wishlist={wishlist}
           toggleWishlist={toggleWishlist}
           addToCart={addToCart}
+          user={user}
         />
       );
       default: return (
@@ -162,6 +212,8 @@ const App: React.FC = () => {
           wishlist={wishlist}
           toggleWishlist={toggleWishlist}
           orderHistory={orderHistory}
+          menuItems={menuItems}
+          categories={categories}
         />
       );
     }
@@ -173,8 +225,10 @@ const App: React.FC = () => {
       setActiveTab={setActiveTab} 
       cartCount={cart.reduce((acc, i) => acc + i.quantity, 0)}
       userPhoto={userProfile.photo}
+      user={user}
     >
       {renderView()}
+      {user?.email === 'fredkenogo@gmail.com' && <SeedButton />}
     </Layout>
   );
 };

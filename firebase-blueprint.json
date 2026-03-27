@@ -1,0 +1,121 @@
+{
+  "entities": {
+    "RestaurantSettings": {
+      "title": "Restaurant Settings",
+      "description": "Global settings for the restaurant",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "logo": { "type": "string" },
+        "contactInfo": {
+          "type": "object",
+          "properties": {
+            "phone": { "type": "string" },
+            "whatsapp": { "type": "string" },
+            "location": { "type": "string" },
+            "mapLink": { "type": "string" },
+            "contactPerson": { "type": "string" },
+            "paybill": { "type": "string" },
+            "vendor": { "type": "string" }
+          }
+        },
+        "colors": {
+          "type": "object",
+          "properties": {
+            "primary": { "type": "string" },
+            "text": { "type": "string" },
+            "bg": { "type": "string" },
+            "bgSecondary": { "type": "string" }
+          }
+        },
+        "extraCosts": {
+          "type": "object",
+          "properties": {
+            "topping": { "type": "integer" },
+            "otherExtra": { "type": "integer" }
+          }
+        },
+        "deliveryOptions": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "area": { "type": "string" },
+              "fee": { "type": "integer" },
+              "estimatedTime": { "type": "string" }
+            }
+          }
+        },
+        "customizationOptions": {
+          "type": "object",
+          "properties": {
+            "sides": { "type": "array", "items": { "type": "string" } },
+            "pizzaToppings": { "type": "array", "items": { "type": "string" } },
+            "breakfastToppings": { "type": "array", "items": { "type": "string" } },
+            "burritoFillings": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "Category": {
+      "title": "Category",
+      "description": "A menu category",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "slug": { "type": "string" },
+        "description": { "type": "string" },
+        "sortOrder": { "type": "integer" },
+        "active": { "type": "boolean" },
+        "iconName": { "type": "string" }
+      },
+      "required": ["name", "slug", "active"]
+    },
+    "MenuItem": {
+      "title": "Menu Item",
+      "description": "A single item on the menu",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "tagline": { "type": "string" },
+        "price": { "type": "integer" },
+        "currency": { "type": "string" },
+        "categoryId": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "available": { "type": "boolean" },
+        "featured": { "type": "boolean" },
+        "sortOrder": { "type": "integer" },
+        "note": { "type": "string" },
+        "averageRating": { "type": "number" },
+        "reviews": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "user": { "type": "string" },
+              "rating": { "type": "integer" },
+              "comment": { "type": "string" },
+              "date": { "type": "string" }
+            }
+          }
+        }
+      },
+      "required": ["name", "price", "categoryId", "available"]
+    }
+  },
+  "firestore": {
+    "settings/restaurant": {
+      "schema": "RestaurantSettings",
+      "description": "Global restaurant settings"
+    },
+    "categories": {
+      "schema": "Category",
+      "description": "Collection of menu categories"
+    },
+    "menuItems": {
+      "schema": "MenuItem",
+      "description": "Collection of menu items"
+    }
+  }
+}

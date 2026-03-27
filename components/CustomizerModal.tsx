@@ -92,7 +92,7 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({ item, initialC
 
   return (
     <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/60 backdrop-blur-md animate-in fade-in duration-300">
-      <div className="w-full max-w-md bg-[#fffdfa] rounded-t-[48px] shadow-2xl flex flex-col h-[94vh] overflow-hidden animate-in slide-in-from-bottom duration-500 ease-out">
+      <div className="w-full max-w-md bg-[var(--color-bg)] rounded-t-[48px] shadow-2xl flex flex-col h-[94vh] overflow-hidden animate-in slide-in-from-bottom duration-500 ease-out">
         
         <div className="relative h-64 shrink-0 overflow-hidden">
           <img 
@@ -100,7 +100,7 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({ item, initialC
             alt={item.name} 
             className="w-full h-full object-cover animate-in zoom-in-110 duration-1000"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-[#fffdfa] via-transparent to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-[var(--color-bg)] via-transparent to-transparent" />
           
           <button 
             onClick={onClose} 
@@ -109,7 +109,7 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({ item, initialC
             <X className="w-5 h-5" />
           </button>
 
-          <div className="absolute bottom-6 right-8 bg-[#f97316] text-white px-5 py-2 rounded-2xl font-black text-sm shadow-xl animate-in fade-in slide-in-from-right duration-700">
+          <div className="absolute bottom-6 right-8 bg-[var(--color-primary)] text-white px-5 py-2 rounded-2xl font-black text-sm shadow-xl animate-in fade-in slide-in-from-right duration-700">
             {item.price.toLocaleString()} RWF
           </div>
         </div>
@@ -119,48 +119,48 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({ item, initialC
             <div className="space-y-1">
               <div className="flex items-center justify-between">
                 {item.tagline && (
-                  <p className="text-[#f97316] text-[10px] font-black uppercase tracking-[0.2em]">
+                  <p className="text-[var(--color-primary)] text-[10px] font-black uppercase tracking-[0.2em]">
                     {item.tagline}
                   </p>
                 )}
                 {item.averageRating && (
-                  <div className="flex items-center gap-1 bg-yellow-400/10 px-2 py-1 rounded-lg">
-                    <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
-                    <span className="text-[10px] font-black text-yellow-700">{item.averageRating.toFixed(1)}</span>
+                  <div className="flex items-center gap-1 bg-[var(--color-rating)]/10 px-2 py-1 rounded-lg">
+                    <Star className="w-3 h-3 text-[var(--color-rating)] fill-[var(--color-rating)]" />
+                    <span className="text-[10px] font-black text-[var(--color-primary)]">{item.averageRating.toFixed(1)}</span>
                   </div>
                 )}
               </div>
-              <h3 className="text-3xl font-serif text-[#3e2723] uppercase leading-tight">{item.name}</h3>
+              <h3 className="text-3xl font-serif text-[var(--color-text)] uppercase leading-tight">{item.name}</h3>
             </div>
             
-            <div className="bg-orange-50/50 rounded-3xl p-5 border border-orange-100/50">
-              <p className="text-[#3e2723]/70 text-sm leading-relaxed italic">
+            <div className="bg-[var(--color-primary)]/5 rounded-3xl p-5 border border-[var(--color-border)]">
+              <p className="text-[var(--color-text)]/70 text-sm leading-relaxed italic">
                 "{item.description}"
               </p>
             </div>
 
             {item.note && (
-              <div className="bg-[#f5f5dc] p-4 rounded-2xl text-[10px] text-[#3e2723]/60 font-bold uppercase tracking-tight flex gap-3 items-center">
-                <Info className="w-4 h-4 text-[#f97316] shrink-0" />
+              <div className="bg-[var(--color-bg-secondary)] p-4 rounded-2xl text-[10px] text-[var(--color-text)]/60 font-bold uppercase tracking-tight flex gap-3 items-center">
+                <Info className="w-4 h-4 text-[var(--color-primary)] shrink-0" />
                 <span>{item.note}</span>
               </div>
             )}
           </section>
 
-          <div className="h-px bg-[#f5f5dc] w-full" />
+          <div className="h-px bg-[var(--color-border)] w-full" />
 
           <section className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 delay-200">
-            <h4 className="text-xs font-black text-[#3e2723]/30 uppercase tracking-[0.3em]">Personalize Your Order</h4>
+            <h4 className="text-xs font-black text-[var(--color-text)]/30 uppercase tracking-[0.3em]">Personalize Your Order</h4>
             {item.note === ACCOMPANIMENTS_NOTE && (
               <div className="space-y-5">
                 <div className="flex items-center justify-between">
                   <h4 className="text-lg font-serif flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-xl bg-orange-100 flex items-center justify-center text-[#f97316]">
+                    <div className="w-8 h-8 rounded-xl bg-[var(--color-primary)]/10 flex items-center justify-center text-[var(--color-primary)]">
                       <Utensils className="w-4 h-4" />
                     </div>
                     Choose 2 Sides
                   </h4>
-                  <span className="text-[10px] font-black text-gray-300 uppercase tracking-widest">{selectedSides.length}/2 Selected</span>
+                  <span className="text-[10px] font-black text-[var(--color-text-muted)] uppercase tracking-widest">{selectedSides.length}/2 Selected</span>
                 </div>
                 <div className="grid grid-cols-2 gap-2.5">
                   {CUSTOMIZATION_OPTIONS.SIDES.map(side => (
@@ -170,8 +170,8 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({ item, initialC
                       disabled={selectedSides.length >= 2 && !selectedSides.includes(side)}
                       className={`px-4 py-4 rounded-2xl text-[10px] font-black uppercase tracking-tighter border-2 transition-all flex items-center justify-between shadow-sm ${
                         selectedSides.includes(side)
-                          ? 'bg-[#3e2723] text-white border-[#3e2723] scale-[1.02]'
-                          : 'bg-white text-[#3e2723]/40 border-[#f5f5dc] disabled:opacity-20'
+                          ? 'bg-[var(--color-text)] text-white border-[var(--color-text)] scale-[1.02]'
+                          : 'bg-white text-[var(--color-text)]/40 border-[var(--color-border)] disabled:opacity-20'
                       }`}
                     >
                       {side}
@@ -186,12 +186,12 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({ item, initialC
               <div className="space-y-5">
                 <div className="flex items-center justify-between">
                   <h4 className="text-lg font-serif flex items-center gap-3">
-                     <div className="w-8 h-8 rounded-xl bg-orange-100 flex items-center justify-center text-[#f97316]">
+                     <div className="w-8 h-8 rounded-xl bg-[var(--color-primary)]/10 flex items-center justify-center text-[var(--color-primary)]">
                       <Cherry className="w-4 h-4" />
                     </div>
                     Toppings
                   </h4>
-                  <span className="text-[10px] font-black text-[#f97316] uppercase tracking-widest">Select Toppings</span>
+                  <span className="text-[10px] font-black text-[var(--color-primary)] uppercase tracking-widest">Select Toppings</span>
                 </div>
                 <div className="grid grid-cols-2 gap-2.5">
                   {CUSTOMIZATION_OPTIONS.BREAKFAST_TOPPINGS.map(topping => (
@@ -200,8 +200,8 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({ item, initialC
                       onClick={() => toggleTopping(topping)}
                       className={`px-4 py-4 rounded-2xl text-[10px] font-black uppercase tracking-tighter border-2 transition-all flex items-center justify-between shadow-sm ${
                         selectedToppings.includes(topping)
-                          ? 'bg-[#3e2723] text-white border-[#3e2723] scale-[1.02]'
-                          : 'bg-white text-[#3e2723]/40 border-[#f5f5dc]'
+                          ? 'bg-[var(--color-text)] text-white border-[var(--color-text)] scale-[1.02]'
+                          : 'bg-white text-[var(--color-text)]/40 border-[var(--color-border)]'
                       }`}
                     >
                       {topping}
@@ -216,12 +216,12 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({ item, initialC
               <div className="space-y-5">
                 <div className="flex items-center justify-between">
                   <h4 className="text-lg font-serif flex items-center gap-3">
-                     <div className="w-8 h-8 rounded-xl bg-orange-100 flex items-center justify-center text-[#f97316]">
+                     <div className="w-8 h-8 rounded-xl bg-[var(--color-primary)]/10 flex items-center justify-center text-[var(--color-primary)]">
                       <Utensils className="w-4 h-4" />
                     </div>
                     Fillings
                   </h4>
-                  <span className="text-[10px] font-black text-[#f97316] uppercase tracking-widest">Add Fillings</span>
+                  <span className="text-[10px] font-black text-[var(--color-primary)] uppercase tracking-widest">Add Fillings</span>
                 </div>
                 <div className="grid grid-cols-2 gap-2.5">
                   {CUSTOMIZATION_OPTIONS.BURRITO_FILLINGS.map(filling => (
@@ -230,8 +230,8 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({ item, initialC
                       onClick={() => toggleTopping(filling)}
                       className={`px-4 py-4 rounded-2xl text-[10px] font-black uppercase tracking-tighter border-2 transition-all flex items-center justify-between shadow-sm ${
                         selectedToppings.includes(filling)
-                          ? 'bg-[#3e2723] text-white border-[#3e2723] scale-[1.02]'
-                          : 'bg-white text-[#3e2723]/40 border-[#f5f5dc]'
+                          ? 'bg-[var(--color-text)] text-white border-[var(--color-text)] scale-[1.02]'
+                          : 'bg-white text-[var(--color-text)]/40 border-[var(--color-border)]'
                       }`}
                     >
                       {filling}
@@ -246,12 +246,12 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({ item, initialC
               <div className="space-y-5">
                 <div className="flex items-center justify-between">
                   <h4 className="text-lg font-serif flex items-center gap-3">
-                     <div className="w-8 h-8 rounded-xl bg-orange-100 flex items-center justify-center text-[#f97316]">
+                     <div className="w-8 h-8 rounded-xl bg-[var(--color-primary)]/10 flex items-center justify-center text-[var(--color-primary)]">
                       <PizzaIcon className="w-4 h-4" />
                     </div>
                     Extra Toppings
                   </h4>
-                  <span className="text-[10px] font-black text-[#f97316] uppercase tracking-widest">+{EXTRA_COSTS.TOPPING.toLocaleString()} RWF / ea</span>
+                  <span className="text-[10px] font-black text-[var(--color-primary)] uppercase tracking-widest">+{EXTRA_COSTS.TOPPING.toLocaleString()} RWF / ea</span>
                 </div>
                 <div className="grid grid-cols-2 gap-2.5">
                   {CUSTOMIZATION_OPTIONS.PIZZA_TOPPINGS.map(topping => (
@@ -260,8 +260,8 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({ item, initialC
                       onClick={() => toggleTopping(topping)}
                       className={`px-4 py-4 rounded-2xl text-[10px] font-black uppercase tracking-tighter border-2 transition-all flex items-center justify-between shadow-sm ${
                         selectedToppings.includes(topping)
-                          ? 'bg-[#3e2723] text-white border-[#3e2723] scale-[1.02]'
-                          : 'bg-white text-[#3e2723]/40 border-[#f5f5dc]'
+                          ? 'bg-[var(--color-text)] text-white border-[var(--color-text)] scale-[1.02]'
+                          : 'bg-white text-[var(--color-text)]/40 border-[var(--color-border)]'
                       }`}
                     >
                       {topping}
@@ -275,12 +275,12 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({ item, initialC
             <div className="space-y-5">
               <div className="flex items-center justify-between">
                 <h4 className="text-lg font-serif flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-xl bg-orange-100 flex items-center justify-center text-[#f97316]">
+                  <div className="w-8 h-8 rounded-xl bg-[var(--color-primary)]/10 flex items-center justify-center text-[var(--color-primary)]">
                     <Edit3 className="w-4 h-4" />
                   </div>
                   Add Other Extras
                 </h4>
-                <span className="text-[10px] font-black text-[#f97316] uppercase tracking-widest">+{EXTRA_COSTS.OTHER_EXTRA.toLocaleString()} RWF / ea</span>
+                <span className="text-[10px] font-black text-[var(--color-primary)] uppercase tracking-widest">+{EXTRA_COSTS.OTHER_EXTRA.toLocaleString()} RWF / ea</span>
               </div>
               <div className="space-y-3">
                 <input 
@@ -288,60 +288,60 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({ item, initialC
                   value={extra1}
                   onChange={(e) => setExtra1(e.target.value)}
                   placeholder="specify the extra"
-                  className="w-full bg-[#f5f5dc]/30 border-2 border-transparent focus:border-[#f97316] focus:bg-white rounded-2xl px-6 py-5 text-sm outline-none transition-all placeholder:text-[#3e2723]/30"
+                  className="w-full bg-[var(--color-bg-secondary)]/30 border-2 border-transparent focus:border-[var(--color-primary)] focus:bg-white rounded-2xl px-6 py-5 text-sm outline-none transition-all placeholder:text-[var(--color-text)]/30"
                 />
                 <input 
                   type="text"
                   value={extra2}
                   onChange={(e) => setExtra2(e.target.value)}
                   placeholder="specify the extra"
-                  className="w-full bg-[#f5f5dc]/30 border-2 border-transparent focus:border-[#f97316] focus:bg-white rounded-2xl px-6 py-5 text-sm outline-none transition-all placeholder:text-[#3e2723]/30"
+                  className="w-full bg-[var(--color-bg-secondary)]/30 border-2 border-transparent focus:border-[var(--color-primary)] focus:bg-white rounded-2xl px-6 py-5 text-sm outline-none transition-all placeholder:text-[var(--color-text)]/30"
                 />
               </div>
             </div>
 
             <div className="space-y-5">
               <h4 className="text-lg font-serif flex items-center gap-3">
-                <div className="w-8 h-8 rounded-xl bg-orange-100 flex items-center justify-center text-[#f97316]">
+                <div className="w-8 h-8 rounded-xl bg-[var(--color-primary)]/10 flex items-center justify-center text-[var(--color-primary)]">
                   <MessageSquare className="w-4 h-4" />
                 </div>
                 Preparation Instructions
               </h4>
-              <div className="bg-[#f5f5dc]/20 rounded-3xl p-1 shadow-inner border-2 border-transparent focus-within:border-[#f97316] transition-all">
+              <div className="bg-[var(--color-bg-secondary)]/20 rounded-3xl p-1 shadow-inner border-2 border-transparent focus-within:border-[var(--color-primary)] transition-all">
                 <textarea 
                   value={instructions}
                   onChange={(e) => setInstructions(e.target.value)}
                   placeholder="Tell us how you'd like your meal prepared..."
-                  className="w-full bg-[#fffdfa]/50 rounded-[22px] p-5 text-sm outline-none resize-none transition-all min-h-[120px] placeholder:italic placeholder:text-[#3e2723]/30"
+                  className="w-full bg-[var(--color-bg)]/50 rounded-[22px] p-5 text-sm outline-none resize-none transition-all min-h-[120px] placeholder:italic placeholder:text-[var(--color-text)]/30"
                   rows={4}
                 />
               </div>
             </div>
           </section>
 
-          <div className="h-px bg-[#f5f5dc] w-full" />
+          <div className="h-px bg-[var(--color-border)] w-full" />
 
           {/* REVIEWS SECTION */}
           <section className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 delay-300">
             <div className="flex items-center justify-between">
               <h4 className="text-xl font-serif flex items-center gap-3">
-                <div className="w-8 h-8 rounded-xl bg-orange-100 flex items-center justify-center text-[#f97316]">
+                <div className="w-8 h-8 rounded-xl bg-[var(--color-primary)]/10 flex items-center justify-center text-[var(--color-primary)]">
                   <Star className="w-4 h-4" />
                 </div>
                 Guest Reviews
               </h4>
               <button 
                 onClick={() => setShowReviewForm(!showReviewForm)}
-                className="text-[10px] font-black text-[#f97316] uppercase tracking-widest border-b border-[#f97316]/30 pb-0.5"
+                className="text-[10px] font-black text-[var(--color-primary)] uppercase tracking-widest border-b border-[var(--color-primary)]/30 pb-0.5"
               >
                 {showReviewForm ? 'Cancel' : 'Write a Review'}
               </button>
             </div>
 
             {showReviewForm && (
-              <div className="bg-white border border-[#f5f5dc] rounded-[32px] p-6 space-y-4 shadow-sm animate-in zoom-in-95 duration-300">
+              <div className="bg-white border border-[var(--color-border)] rounded-[32px] p-6 space-y-4 shadow-sm animate-in zoom-in-95 duration-300">
                 <div className="space-y-1">
-                   <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest px-1">Your Rating</p>
+                   <p className="text-[9px] font-black text-[var(--color-text-muted)] uppercase tracking-widest px-1">Your Rating</p>
                    <div className="flex items-center gap-2">
                      {[1, 2, 3, 4, 5].map((star) => (
                        <button 
@@ -349,7 +349,7 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({ item, initialC
                          onClick={() => setNewReviewRating(star)}
                          className="p-1 transition-transform active:scale-75"
                        >
-                         <Star className={`w-6 h-6 ${star <= newReviewRating ? 'text-yellow-500 fill-yellow-500' : 'text-gray-200'}`} />
+                         <Star className={`w-6 h-6 ${star <= newReviewRating ? 'text-[var(--color-rating)] fill-[var(--color-rating)]' : 'text-[var(--color-border)]'}`} />
                        </button>
                      ))}
                    </div>
@@ -359,18 +359,18 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({ item, initialC
                   value={newReviewName}
                   onChange={(e) => setNewReviewName(e.target.value)}
                   placeholder="Your Name" 
-                  className="w-full px-5 py-4 rounded-2xl bg-[#f5f5dc]/30 border-2 border-transparent focus:border-[#f97316] focus:bg-white outline-none text-sm transition-all"
+                  className="w-full px-5 py-4 rounded-2xl bg-[var(--color-bg-secondary)]/30 border-2 border-transparent focus:border-[var(--color-primary)] focus:bg-white outline-none text-sm transition-all"
                 />
                 <textarea 
                   value={newReviewComment}
                   onChange={(e) => setNewReviewComment(e.target.value)}
                   placeholder="What did you think of the flavor?" 
                   rows={3}
-                  className="w-full px-5 py-4 rounded-2xl bg-[#f5f5dc]/30 border-2 border-transparent focus:border-[#f97316] focus:bg-white outline-none text-sm resize-none transition-all"
+                  className="w-full px-5 py-4 rounded-2xl bg-[var(--color-bg-secondary)]/30 border-2 border-transparent focus:border-[var(--color-primary)] focus:bg-white outline-none text-sm resize-none transition-all"
                 />
                 <button 
                   disabled={!newReviewComment || !newReviewName}
-                  className="w-full bg-[#3e2723] text-white py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 disabled:opacity-30 disabled:grayscale transition-all"
+                  className="w-full bg-[var(--color-text)] text-white py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 disabled:opacity-30 disabled:grayscale transition-all"
                 >
                   Post Review <Send className="w-3 h-3" />
                 </button>
@@ -380,40 +380,40 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({ item, initialC
             {item.reviews && item.reviews.length > 0 ? (
               <div className="space-y-6">
                 {item.reviews.map((review, idx) => (
-                  <div key={idx} className="space-y-3 pb-6 border-b border-[#f5f5dc] last:border-none">
+                  <div key={idx} className="space-y-3 pb-6 border-b border-[var(--color-border)] last:border-none">
                     <div className="flex justify-between items-start">
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-[#f5f5dc] flex items-center justify-center text-[#3e2723]">
+                        <div className="w-8 h-8 rounded-full bg-[var(--color-bg-secondary)] flex items-center justify-center text-[var(--color-text)]">
                           <User className="w-4 h-4" />
                         </div>
                         <div>
-                          <p className="text-xs font-black text-[#3e2723]">{review.user}</p>
+                          <p className="text-xs font-black text-[var(--color-text)]">{review.user}</p>
                           <div className="flex items-center gap-0.5">
                             {[...Array(5)].map((_, i) => (
-                              <Star key={i} className={`w-2 h-2 ${i < review.rating ? 'text-yellow-500 fill-yellow-500' : 'text-gray-200'}`} />
+                              <Star key={i} className={`w-2 h-2 ${i < review.rating ? 'text-[var(--color-rating)] fill-[var(--color-rating)]' : 'text-[var(--color-border)]'}`} />
                             ))}
                           </div>
                         </div>
                       </div>
-                      <span className="text-[8px] font-black text-gray-300 uppercase tracking-widest">{review.date}</span>
+                      <span className="text-[8px] font-black text-[var(--color-text-muted)] uppercase tracking-widest">{review.date}</span>
                     </div>
-                    <p className="text-xs text-[#3e2723]/60 italic leading-relaxed">"{review.comment}"</p>
+                    <p className="text-xs text-[var(--color-text)]/60 italic leading-relaxed">"{review.comment}"</p>
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="text-center py-10 bg-[#f5f5dc]/20 rounded-[32px] border-2 border-dashed border-[#f5f5dc]">
-                <MessageSquare className="w-8 h-8 text-gray-200 mx-auto mb-3" />
-                <p className="text-[10px] text-gray-400 italic">No reviews yet. Be the first to share your thoughts!</p>
+              <div className="text-center py-10 bg-[var(--color-bg-secondary)]/20 rounded-[32px] border-2 border-dashed border-[var(--color-border)]">
+                <MessageSquare className="w-8 h-8 text-[var(--color-border)] mx-auto mb-3" />
+                <p className="text-[10px] text-[var(--color-text-muted)] italic">No reviews yet. Be the first to share your thoughts!</p>
               </div>
             )}
           </section>
         </div>
 
-        <footer className="p-8 bg-white border-t border-[#f5f5dc] sticky bottom-0 z-10 safe-bottom">
+        <footer className="p-8 bg-white border-t border-[var(--color-border)] sticky bottom-0 z-10 safe-bottom">
           <button 
             onClick={handleConfirm}
-            className={`w-full py-6 rounded-[32px] font-black uppercase tracking-[0.2em] shadow-2xl flex items-center justify-between px-10 text-xs active:scale-95 transition-all ${isSuccess ? 'bg-[#25D366] text-white' : 'bg-[#f97316] text-white shadow-orange-200'}`}
+            className={`w-full py-6 rounded-[32px] font-black uppercase tracking-[0.2em] shadow-2xl flex items-center justify-between px-10 text-xs active:scale-95 transition-all ${isSuccess ? 'bg-[#25D366] text-white' : 'bg-[var(--color-primary)] text-white shadow-[var(--color-primary)]/20'}`}
           >
             {isSuccess ? (
               <span className="flex items-center gap-3 mx-auto animate-in zoom-in duration-300">

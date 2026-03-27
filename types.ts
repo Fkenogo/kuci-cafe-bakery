@@ -1,5 +1,5 @@
 
-export type Category = 
+export type CategoryName = 
   | "Signature Meals"
   | "Kuci Omelettes"
   | "Kuci Salads"
@@ -25,6 +25,16 @@ export type Category =
   | "Coffee & Espresso"
   | "Bakery & Pastries";
 
+export interface Category {
+  id: string;
+  name: string;
+  slug: string;
+  description?: string;
+  sortOrder?: number;
+  active: boolean;
+  iconName?: string;
+}
+
 export interface Review {
   user: string;
   rating: number;
@@ -37,11 +47,46 @@ export interface MenuItem {
   name: string;
   description: string;
   price: number;
-  category: Category;
+  category: string; // Changed to string to hold categoryId
   tagline?: string;
   note?: string;
   reviews?: Review[];
   averageRating?: number;
+  imageUrl?: string;
+  available: boolean;
+  featured?: boolean;
+  sortOrder?: number;
+}
+
+export interface RestaurantSettings {
+  name: string;
+  logo?: string;
+  contactInfo: {
+    phone: string;
+    whatsapp: string;
+    location: string;
+    mapLink: string;
+    contactPerson: string;
+    paybill: string;
+    vendor: string;
+  };
+  colors: {
+    primary: string;
+    text: string;
+    bg: string;
+    bgSecondary: string;
+  };
+  extraCosts: {
+    topping: number;
+    otherExtra: number;
+  };
+  deliveryOptions: Record<string, DeliveryInfo>;
+  customizationOptions: {
+    sides: string[];
+    pizzaToppings: string[];
+    breakfastToppings: string[];
+    burritoFillings: string[];
+  };
 }
 
 export interface ItemCustomization {
