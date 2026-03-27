@@ -1,0 +1,58 @@
+erDiagram
+    SETTINGS {
+        string id "restaurant"
+        string name
+        string logo
+        object contactInfo
+        object colors
+        object extraCosts
+        object deliveryOptions
+        object customizationOptions
+    }
+
+    CATEGORY {
+        string id
+        string name
+        string slug
+        string description
+        number sortOrder
+        boolean active
+        string iconName
+    }
+
+    MENU_ITEM {
+        string id
+        string name
+        string description
+        number price
+        string category "actual app field; stores category document id"
+        string categoryId "required by rules/schema but not written by seed"
+        string tagline
+        string note
+        number averageRating
+        string imageUrl
+        boolean available
+        boolean featured
+        number sortOrder
+        array reviews
+    }
+
+    USER {
+        string id "auth uid"
+        string name
+        string email
+        string role
+    }
+
+    ORDER {
+        string id
+        string userId
+        string status
+        array items
+        number total
+        string type
+        string createdAt
+    }
+
+    CATEGORY ||--o{ MENU_ITEM : "referenced by menuItems.category (actual implementation)"
+    USER ||--o{ ORDER : "implied only"

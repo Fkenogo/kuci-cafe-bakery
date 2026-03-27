@@ -1,0 +1,50 @@
+flowchart TD
+    Start["App Load"]
+    Bootstrap["Load localStorage + subscribe to Auth + Firestore"]
+    Home["Home Tab"]
+    Search["Search / Featured / Categories"]
+    Menu["Menu Tab"]
+    Customizer["Customizer Modal"]
+    Cart["Orders Tab / Cart"]
+    Identify["Name + Phone Form"]
+    Service["Choose Eat-In / Pickup / Delivery"]
+    Payment["Choose MoMo or WhatsApp"]
+    WhatsApp["Open WhatsApp deep link"]
+    MoMo["Open tel: USSD payment string"]
+    Complete["Local order completion\nhistory + loyalty update"]
+    Profile["Profile Tab"]
+    Wishlist["Wishlist"]
+    Reorder["Repeat order"]
+    Info["Info Tab"]
+    Maps["Open Google Maps"]
+    Feedback["Feedback form UI"]
+    Auth["Google Sign-In / Sign-Out"]
+    AdminSeed["SeedButton"]
+    Firestore["Firestore writes"]
+    Broken["Broken / missing backend connection"]
+
+    Start --> Bootstrap
+    Bootstrap --> Home
+    Bootstrap --> Auth
+    Home --> Search
+    Search --> Menu
+    Search --> Customizer
+    Menu --> Customizer
+    Customizer --> Cart
+    Cart --> Identify
+    Identify --> Service
+    Service --> Payment
+    Payment --> WhatsApp
+    Payment --> MoMo
+    WhatsApp --> Complete
+    MoMo --> Broken
+    Complete --> Profile
+    Profile --> Wishlist
+    Profile --> Reorder
+    Reorder --> Cart
+    Home --> Info
+    Info --> Maps
+    Info --> Feedback
+    Feedback --> Broken
+    Auth --> AdminSeed
+    AdminSeed --> Firestore

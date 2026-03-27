@@ -1,0 +1,74 @@
+flowchart TD
+    Customer[Customer User]
+    Admin[Admin User]
+
+    subgraph Browser["Customer Browser / Mobile Web App"]
+        App["React + Vite SPA\nApp.tsx"]
+        Layout["Tabbed UI Shell\nLayout.tsx"]
+        Home["Home / Search / Featured"]
+        Menu["Menu / Category Listing"]
+        Bakery["Bakery View"]
+        Orders["Cart + Checkout Flow"]
+        Info["Info / Contact / Payment Guide"]
+        Profile["Profile / Wishlist / History"]
+        Customizer["Item Customizer Modal"]
+        Local["localStorage\nkuci_cart\nkuci_wishlist\nkuci_user\nkuci_history\nkuci_loyalty_points"]
+    end
+
+    subgraph Firebase["Firebase Project"]
+        Auth["Firebase Auth\nGoogle Provider"]
+        Firestore["Cloud Firestore"]
+        Settings["settings/restaurant"]
+        Categories["categories"]
+        MenuItems["menuItems"]
+        Users["users (rules only / implied)"]
+        OrdersCollection["orders (implied only)"]
+        Functions["Cloud Functions\nfunctions/src/index.ts"]
+    end
+
+    subgraph External["External Services"]
+        WhatsApp["WhatsApp deep link"]
+        Maps["Google Maps link"]
+        Tel["tel: USSD / Mobile Money handoff"]
+        Unsplash["Unsplash image URLs"]
+    end
+
+    Customer --> App
+    Admin --> App
+    App --> Layout
+    Layout --> Home
+    Layout --> Menu
+    Layout --> Bakery
+    Layout --> Orders
+    Layout --> Info
+    Layout --> Profile
+    Home --> Customizer
+    Menu --> Customizer
+    Orders --> Customizer
+
+    App --> Local
+    Profile --> Local
+    Orders --> Local
+
+    App --> Auth
+    Auth --> App
+
+    App --> Firestore
+    Firestore --> Settings
+    Firestore --> Categories
+    Firestore --> MenuItems
+
+    Admin -->|Google sign-in| Auth
+    Admin -->|Seed button for hardcoded email| Firestore
+
+    Orders -->|Open prefilled order message| WhatsApp
+    Orders -->|Open tel: payment code| Tel
+    Info -->|Open location link| Maps
+    Home --> Unsplash
+    Menu --> Unsplash
+    Bakery --> Unsplash
+    Customizer --> Unsplash
+    Info --> Unsplash
+
+    OrdersCollection --> Functions
+    MenuItems --> Functions
