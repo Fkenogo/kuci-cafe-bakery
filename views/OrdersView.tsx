@@ -4,6 +4,9 @@ import { Trash2, Plus, Minus, Send, Phone, Wallet, Truck, ShoppingBag, MapPin, S
 import { CartItem, OrderType, DeliveryArea, UserProfile, HistoricalOrder, ItemCustomization, RestaurantSettings } from '../types';
 import { DELIVERY_OPTIONS, CATEGORY_ICONS } from '../constants';
 import { CustomizerModal } from '../components/CustomizerModal';
+import { getCartItemUnitPrice, getCategoryIconKey, getDeliveryOptions, getMomoDialHref, getRestaurantContactInfo, getWhatsAppHref } from '../lib/catalog';
+import { createOrder, validateOrderInput } from '../lib/orderPersistence';
+import { formatBusinessDateDisplay, toBusinessDate } from '../lib/businessDate';
 
 interface OrdersViewProps {
   cart: CartItem[];
@@ -18,14 +21,17 @@ interface OrdersViewProps {
   onReorder: (items: CartItem[]) => void;
   onUpdateCustomization: (instanceId: string, customization: ItemCustomization) => void;
   settings: RestaurantSettings | null;
+  userId?: string | null;
 }
 
 export const OrdersView: React.FC<OrdersViewProps> = ({ 
-  cart, updateQuantity, removeFromCart, clearCart, loyaltyPoints, userProfile, setUserProfile, onOrderComplete, orderHistory, onReorder, onUpdateCustomization, settings
+  cart, updateQuantity, removeFromCart, clearCart, loyaltyPoints, userProfile, setUserProfile, onOrderComplete, orderHistory, onReorder, onUpdateCustomization, settings, userId
 }) => {
   const [orderType, setOrderType] = useState<OrderType>(OrderType.PICK_UP);
   const [deliveryArea, setDeliveryArea] = useState<DeliveryArea>(DeliveryArea.NYAMATA_CENTRAL);
   const [editingItem, setEditingItem] = useState<CartItem | null>(null);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   
   // Local state for the identity form
   const [tempProfile, setTempProfile] = useState<UserProfile>(userProfile);
@@ -42,8 +48,11 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
     }
   }, [userProfile, isIdentified]);
 
-  const productSubtotal = cart.reduce((acc, item) => acc + ((item.price + (item.customization?.extraCost || 0)) * item.quantity), 0);
-  const deliveryInfo = DELIVERY_OPTIONS[deliveryArea];
+  const contactInfo = getRestaurantContactInfo(settings);
+  const availableDeliveryOptions = getDeliveryOptions(settings, DELIVERY_OPTIONS);
+  const deliveryAreas = Object.keys(availableDeliveryOptions) as DeliveryArea[];
+  const productSubtotal = cart.reduce((acc, item) => acc + (getCartItemUnitPrice(item) * item.quantity), 0);
+  const deliveryInfo = availableDeliveryOptions[deliveryArea] || availableDeliveryOptions[deliveryAreas[0]] || DELIVERY_OPTIONS[DeliveryArea.NYAMATA_CENTRAL];
   const deliveryFee = orderType === OrderType.DELIVERY ? deliveryInfo.fee : 0;
   
   const earnedPoints = Math.floor(productSubtotal / 100);
@@ -51,6 +60,9 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
   const total = (productSubtotal - discount) + deliveryFee;
 
   const isInputValid = tempProfile.name.trim().length > 2 && tempProfile.phone.trim().length >= 10;
+  const momoDialHref = getMomoDialHref(contactInfo.momoPayCode);
+  const momoUnavailableReason = !contactInfo.momoPayCode ? 'Mobile Money is not configured yet.' : null;
+  const whatsappUnavailableReason = !contactInfo.whatsapp ? 'WhatsApp ordering is not configured yet.' : null;
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,16 +81,70 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
       setShowProfileForm(true);
       return;
     }
-    if (!settings) return;
-    const ussdString = `*182*8*1*${settings.contact.paybill}%23`;
-    window.location.href = `tel:${ussdString}`;
+    void handleCheckout(() => {
+      if (!momoDialHref) return;
+      window.location.href = momoDialHref;
+    });
   };
 
-  const handleWhatsAppOrder = () => {
+  const handleOrderSuccess = (orderId: string) => {
+    onOrderComplete({
+      id: orderId,
+      date: formatBusinessDateDisplay(toBusinessDate()),
+      items: [...cart],
+      total,
+      type: orderType
+    });
+  };
+
+  const handleCheckout = async (onSuccess: (orderId: string) => void) => {
+    if (isSubmittingOrder) return;
     if (!isIdentified) {
       setShowProfileForm(true);
       return;
     }
+
+    const validation = validateOrderInput({
+      cart,
+      orderType,
+      deliveryArea,
+      userProfile,
+      subtotal: productSubtotal,
+      deliveryFee,
+      total,
+      userId,
+    });
+
+    if (validation.valid === false) {
+      setCheckoutError(validation.message);
+      return;
+    }
+
+    setCheckoutError(null);
+    setIsSubmittingOrder(true);
+
+    try {
+      const { orderId } = await createOrder({
+        cart,
+        orderType,
+        deliveryArea,
+        userProfile,
+        subtotal: productSubtotal,
+        deliveryFee,
+        total,
+        userId,
+      });
+      handleOrderSuccess(orderId);
+      onSuccess(orderId);
+    } catch (error) {
+      console.error('Failed to persist order:', error);
+      setCheckoutError('We could not save your order. Please try again before continuing.');
+    } finally {
+      setIsSubmittingOrder(false);
+    }
+  };
+
+  const handleWhatsAppOrder = () => {
     if (!settings) return;
 
     const itemsList = cart.map(i => {
@@ -88,22 +154,19 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
       if (i.customization?.extras) cust += ` (Extras: ${i.customization.extras.join(', ')})`;
       if (i.customization?.instructions) cust += ` (Note: ${i.customization.instructions})`;
       
-      const itemPrice = i.price + (i.customization?.extraCost || 0);
+      const itemPrice = getCartItemUnitPrice(i);
       return `• ${i.name}${cust} x${i.quantity} (${(itemPrice * i.quantity).toLocaleString()} RWF)`;
-    }).join('%0A');
+    }).join('\n');
 
-    const orderDetails = `%0A%0A*CUSTOMER:* ${userProfile.name}%0A*PHONE:* ${userProfile.phone}%0A*ORDER TYPE:* ${orderType}${orderType === OrderType.DELIVERY ? `%0A*AREA:* ${deliveryArea}%0A*EST. TIME:* ${deliveryInfo.estimatedTime}` : ''}%0A*PRODUCT TOTAL:* ${productSubtotal.toLocaleString()} RWF%0A*DISCOUNT:* -${discount.toLocaleString()} RWF%0A*DELIVERY:* ${deliveryFee.toLocaleString()} RWF%0A*TOTAL:* ${total.toLocaleString()} RWF%0A*LOYALTY POINTS EARNED:* ${earnedPoints}`;
-    const message = `Hello ${settings.name}! I'd like to place an order:%0A%0A${itemsList}${orderDetails}`;
-    
-    onOrderComplete({
-      id: Math.random().toString(36).substr(2, 9),
-      date: new Date().toLocaleDateString(),
-      items: [...cart],
-      total: total,
-      type: orderType
+    const orderDetails = `\n\n*CUSTOMER:* ${userProfile.name}\n*PHONE:* ${userProfile.phone}\n*ORDER TYPE:* ${orderType}${orderType === OrderType.DELIVERY ? `\n*AREA:* ${deliveryArea}\n*EST. TIME:* ${deliveryInfo.estimatedTime}` : ''}\n*PRODUCT TOTAL:* ${productSubtotal.toLocaleString()} RWF\n*DISCOUNT:* -${discount.toLocaleString()} RWF\n*DELIVERY:* ${deliveryFee.toLocaleString()} RWF\n*TOTAL:* ${total.toLocaleString()} RWF\n*LOYALTY POINTS EARNED:* ${earnedPoints}`;
+    const message = `Hello ${settings.name}! I'd like to place an order:\n\n${itemsList}${orderDetails}`;
+    const whatsappHref = getWhatsAppHref(contactInfo.whatsapp, message);
+
+    if (!whatsappHref) return;
+
+    void handleCheckout(() => {
+      window.open(whatsappHref, '_blank');
     });
-
-    window.open(`https://wa.me/${settings.contact.whatsapp}?text=${message}`, '_blank');
   };
 
   const handleUpdateItemConfirm = (item: any, customization: ItemCustomization) => {
@@ -133,6 +196,12 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
       icon: <Truck className="w-5 h-5" /> 
     },
   ];
+
+  useEffect(() => {
+    if (cart.length > 0) {
+      setCheckoutError(null);
+    }
+  }, [cart, orderType, deliveryArea, total]);
 
   const renderHistorySection = () => {
     if (orderHistory.length === 0) return null;
@@ -239,7 +308,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
       {/* REFACTORED: Cart Items Card Layout */}
       <div className="space-y-5">
         {cart.map((item) => {
-          const itemPriceWithExtras = item.price + (item.customization?.extraCost || 0);
+          const itemPriceWithExtras = getCartItemUnitPrice(item);
           return (
             <div 
               key={item.instanceId} 
@@ -256,11 +325,11 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                 {/* Main Item Info Row - Clicking name/icon opens customizer */}
                 <div className="flex items-start gap-4 cursor-pointer" onClick={() => setEditingItem(item)}>
                   <div className="w-14 h-14 bg-[var(--color-bg-secondary)] rounded-2xl flex items-center justify-center text-[var(--color-primary)] shrink-0">
-                    {CATEGORY_ICONS[item.category] || <Utensils className="w-7 h-7" />}
+                    {CATEGORY_ICONS[getCategoryIconKey(item)] || <Utensils className="w-7 h-7" />}
                   </div>
                   <div className="flex-1 min-w-0">
                     <h4 className="font-bold text-[var(--color-text)] font-serif uppercase leading-tight truncate">{item.name}</h4>
-                    <p className="text-[var(--color-text-muted)] text-[10px] font-bold uppercase tracking-widest mt-1">{item.category}</p>
+                    <p className="text-[var(--color-text-muted)] text-[10px] font-bold uppercase tracking-widest mt-1">{item.categoryName || item.station}</p>
                     <p className="text-[var(--color-primary)] text-sm font-black mt-1">
                       {itemPriceWithExtras.toLocaleString()} RWF <span className="text-[10px] text-[var(--color-text-muted)]/50 font-bold ml-1">/ unit</span>
                     </p>
@@ -285,6 +354,12 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                         <span className="leading-tight uppercase tracking-widest">
                           EXTRAS: {[...(item.customization.toppings || []), ...(item.customization.extras || [])].join(', ')}
                         </span>
+                      </div>
+                    )}
+                    {item.customization.selectedVariantName && (
+                      <div className="flex items-start gap-2.5 text-[10px] font-black text-[var(--color-text)]/60">
+                        <Tag className="w-3 h-3 mt-0.5 shrink-0 text-[var(--color-primary)]" />
+                        <span className="leading-tight uppercase tracking-widest">VARIANT: {item.customization.selectedVariantName}</span>
                       </div>
                     )}
                     {item.customization.instructions && (
@@ -426,7 +501,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
             {orderType === OrderType.DELIVERY && (
               <div className="bg-[var(--color-primary)]/5 rounded-[32px] p-6 space-y-4 border border-[var(--color-border)] animate-in slide-in-from-top-2 duration-300">
                 <div className="flex gap-2 overflow-x-auto no-scrollbar">
-                  {(Object.keys(DELIVERY_OPTIONS) as DeliveryArea[]).map((area) => (
+                  {deliveryAreas.map((area) => (
                     <button
                       key={area}
                       onClick={() => setDeliveryArea(area)}
@@ -440,7 +515,7 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
                 </div>
                 <p className="text-[10px] text-[var(--color-text-muted)]/50 italic flex items-center gap-1.5 px-1">
                   <AlertCircle className="w-3.5 h-3.5 text-[var(--color-primary)]" />
-                  Delivery to {deliveryArea} is {DELIVERY_OPTIONS[deliveryArea].fee.toLocaleString()} RWF.
+                  Delivery to {deliveryArea} is {deliveryInfo.fee.toLocaleString()} RWF.
                 </p>
               </div>
             )}
@@ -487,19 +562,47 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
 
           {/* Actions */}
           <section className="space-y-4">
+            {checkoutError && (
+              <div className="rounded-[28px] border border-red-200 bg-red-50 px-5 py-4 text-[11px] text-red-700 flex items-start gap-3">
+                <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                <span>{checkoutError}</span>
+              </div>
+            )}
             <button 
               onClick={handleMomoPayment}
-              className="w-full bg-[var(--color-primary)] text-white py-6 rounded-[32px] font-black uppercase tracking-[0.2em] shadow-2xl shadow-[var(--color-primary)]/10 flex items-center justify-center gap-3 text-xs active:scale-95 transition-all"
+              disabled={!momoDialHref || isSubmittingOrder}
+              className={`w-full py-6 rounded-[32px] font-black uppercase tracking-[0.2em] shadow-2xl flex items-center justify-center gap-3 text-xs transition-all ${
+                momoDialHref && !isSubmittingOrder
+                  ? 'bg-[var(--color-primary)] text-white shadow-[var(--color-primary)]/10 active:scale-95'
+                  : 'bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)]/50 cursor-not-allowed shadow-none'
+              }`}
             >
-              <Wallet className="w-5 h-5" /> Pay with Mobile Money
+              <Wallet className="w-5 h-5" /> {isSubmittingOrder ? 'Saving Order...' : momoDialHref ? 'Pay with Mobile Money' : 'Mobile Money Unavailable'}
             </button>
+            {momoUnavailableReason && (
+              <p className="text-[10px] text-[var(--color-text-muted)]/60 px-1 flex items-center gap-1.5">
+                <AlertCircle className="w-3.5 h-3.5 text-[var(--color-primary)]" />
+                {momoUnavailableReason}
+              </p>
+            )}
             
             <button 
               onClick={handleWhatsAppOrder}
-              className="w-full bg-[var(--color-text)] text-white py-6 rounded-[32px] font-black uppercase tracking-[0.2em] flex items-center justify-center gap-3 text-xs active:scale-95 transition-all"
+              disabled={!contactInfo.whatsapp || isSubmittingOrder}
+              className={`w-full py-6 rounded-[32px] font-black uppercase tracking-[0.2em] flex items-center justify-center gap-3 text-xs transition-all ${
+                contactInfo.whatsapp && !isSubmittingOrder
+                  ? 'bg-[var(--color-text)] text-white active:scale-95'
+                  : 'bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)]/50 cursor-not-allowed'
+              }`}
             >
-              <Send className="w-5 h-5" /> Order on WhatsApp
+              <Send className="w-5 h-5" /> {isSubmittingOrder ? 'Saving Order...' : contactInfo.whatsapp ? 'Order on WhatsApp' : 'WhatsApp Unavailable'}
             </button>
+            {whatsappUnavailableReason && (
+              <p className="text-[10px] text-[var(--color-text-muted)]/60 px-1 flex items-center gap-1.5">
+                <AlertCircle className="w-3.5 h-3.5 text-[var(--color-primary)]" />
+                {whatsappUnavailableReason}
+              </p>
+            )}
           </section>
 
           {/* Order History Section in Orders Tab */}

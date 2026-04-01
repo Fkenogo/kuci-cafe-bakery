@@ -1,0 +1,8 @@
+{
+  "projects": {
+    "prod": "kuci-cafe-bakery",
+    "default": "kuci-cafe-bakery"
+  },
+  "targets": {},
+  "etags": {}
+}

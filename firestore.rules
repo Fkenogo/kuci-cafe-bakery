@@ -9,11 +9,16 @@ service cloud.firestore {
     // Document ID: restaurant
     // Fields:
     //   - name: string (required)
+    //   - tagline: string (optional)
+    //   - description: string (optional)
     //   - logo: string (optional)
     //   - contactInfo: map (required)
+    //   - active: bool (optional)
     //   - colors: map (required)
     //   - extraCosts: map (required)
     //   - deliveryOptions: map (required)
+    //   - paymentMethods: list (optional)
+    //   - socialLinks: map (optional)
     //
     // Collection: categories
     // Document ID: auto-generated
@@ -25,29 +30,40 @@ service cloud.firestore {
     //   - active: bool (required)
     //   - iconName: string (optional)
     //
-    // Collection: menuItems
-    // Document ID: auto-generated
+    // Collection: menu
+    // Document ID: stable catalog item id
     // Fields:
     //   - name: string (required)
     //   - description: string (optional)
     //   - tagline: string (optional)
-    //   - price: number (required)
-    //   - currency: string (optional)
     //   - categoryId: string (required)
+    //   - categoryName: string (optional)
+    //   - basePrice: number (required)
     //   - imageUrl: string (optional)
+    //   - active: bool (required)
     //   - available: bool (required)
+    //   - station: string (required)
+    //   - itemType: string (required)
     //   - featured: bool (optional)
     //   - sortOrder: number (optional)
     //   - note: string (optional)
     //   - averageRating: number (optional)
     //   - reviews: list (optional)
+    //   - variants: list (optional)
+    //   - modifierGroups: list (optional)
+    //   - tags: list (optional)
     //
     // Collection: users
     // Document ID: userId
     // Fields:
-    //   - name: string (required)
+    //   - uid: string (required)
     //   - email: string (required)
+    //   - displayName: string (required)
+    //   - photoURL: string|null (optional)
     //   - role: string (required, default 'user')
+    //   - isActive: bool (required)
+    //   - createdAt: timestamp (optional)
+    //   - updatedAt: timestamp (optional)
     //
     // ===============================================================
 
@@ -58,21 +74,120 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isBootstrapAdmin() {
+      return isAuthenticated() &&
+        request.auth.token.email == "fredkenogo@gmail.com" &&
+        request.auth.token.email_verified == true;
+    }
+
+    function userRole() {
+      return isAuthenticated()
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+        : null;
+    }
+
     function isAdmin() {
       return isAuthenticated() &&
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-          (request.auth.token.email == "fredkenogo@gmail.com" && request.auth.token.email_verified == true));
+        (userRole() == 'admin' ||
+          isBootstrapAdmin());
+    }
+
+    function isFrontService() {
+      return isAuthenticated() && userRole() == 'front_service';
+    }
+
+    function isBakeryFrontService() {
+      return isAuthenticated() && userRole() == 'bakery_front_service';
+    }
+
+    function isKitchen() {
+      return isAuthenticated() && userRole() == 'kitchen';
+    }
+
+    function isBarista() {
+      return isAuthenticated() && userRole() == 'barista';
+    }
+
+    function isBakeryAccountReconciliation() {
+      return isAuthenticated() && userRole() == 'bakery_account_reconciliation';
+    }
+
+    function isCafeAccountReconciliation() {
+      return isAuthenticated() && userRole() == 'cafe_account_reconciliation';
+    }
+
+    function canReadOperationalOrders() {
+      return isAdmin() ||
+        isFrontService() ||
+        isBakeryFrontService() ||
+        isKitchen() ||
+        isBarista() ||
+        isBakeryAccountReconciliation() ||
+        isCafeAccountReconciliation();
     }
 
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function currentUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function hasValidEmail(data) {
+      return 'email' in data &&
+             data.email is string &&
+             data.email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function hasValidPhoneNumber(data) {
+      return 'phoneNumber' in data &&
+             data.phoneNumber is string &&
+             data.phoneNumber.matches("^\\+[1-9][0-9]{6,14}$");
+    }
+
+    function hasAuthIdentifier(data) {
+      return hasValidEmail(data) || hasValidPhoneNumber(data);
+    }
+
+    function matchesAuthIdentifier(data) {
+      return ((hasValidEmail(data) && request.auth.token.email != null && data.email == request.auth.token.email) ||
+              (!hasValidEmail(data) && !('email' in request.auth.token))) &&
+             ((hasValidPhoneNumber(data) && request.auth.token.phone_number != null && data.phoneNumber == request.auth.token.phone_number) ||
+              (!hasValidPhoneNumber(data) && !('phone_number' in request.auth.token)));
+    }
+
     function isValidUser(data) {
-      return data.keys().hasAll(['name', 'email', 'role']) &&
-             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-             data.email is string && data.email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$") &&
-             data.role in ['admin', 'user'];
+      return data.keys().hasAll(['uid', 'displayName', 'role', 'isActive']) &&
+             data.keys().hasOnly(['uid', 'email', 'phoneNumber', 'displayName', 'photoURL', 'role', 'createdAt', 'updatedAt', 'isActive', 'phone', 'staffCode', 'shiftLabel', 'profileType', 'linkedUid', 'linkedAt']) &&
+             data.uid is string && data.uid.size() > 0 &&
+             data.displayName is string && data.displayName.size() > 0 && data.displayName.size() < 100 &&
+             hasAuthIdentifier(data) &&
+             (!('photoURL' in data) || data.photoURL == null || data.photoURL is string) &&
+             (!('phone' in data) || data.phone is string) &&
+             (!('staffCode' in data) || data.staffCode is string) &&
+             (!('shiftLabel' in data) || data.shiftLabel is string) &&
+             (!('profileType' in data) || data.profileType in ['staff_profile', 'linked_account']) &&
+             (!('linkedUid' in data) || (data.linkedUid is string && data.linkedUid.size() > 0)) &&
+             (!('linkedAt' in data) || data.linkedAt is timestamp) &&
+             data.isActive is bool &&
+             data.role in ['admin', 'user', 'front_service', 'bakery_front_service', 'kitchen', 'barista', 'bakery_account_reconciliation', 'cafe_account_reconciliation'];
+    }
+
+    function isValidStaffIdentity(identity) {
+      return identity is map &&
+             identity.keys().hasAll(['uid', 'displayName', 'role']) &&
+             identity.keys().hasOnly(['uid', 'displayName', 'role']) &&
+             identity.uid is string && identity.uid.size() > 0 &&
+             identity.displayName is string && identity.displayName.size() > 0 &&
+             identity.role in ['admin', 'front_service', 'bakery_front_service', 'kitchen', 'barista', 'bakery_account_reconciliation', 'cafe_account_reconciliation'];
+    }
+
+    function isCurrentUserIdentity(identity) {
+      return isValidStaffIdentity(identity) &&
+             identity.uid == request.auth.uid &&
+             identity.displayName == currentUserData().displayName &&
+             identity.role == currentUserData().role;
     }
 
     function isValidCategory(data) {
@@ -82,12 +197,618 @@ service cloud.firestore {
              data.active is bool;
     }
 
-    function isValidMenuItem(data) {
-      return data.keys().hasAll(['name', 'price', 'categoryId', 'available']) &&
+    function isValidBakeryCategory(data) {
+      return data.keys().hasAll(['id', 'name', 'slug', 'active']) &&
+             data.keys().hasOnly([
+               'id',
+               'name',
+               'slug',
+               'iconName',
+               'sortOrder',
+               'active',
+               'description',
+               'serviceAreaDefault',
+               'frontLaneDefault',
+               'dispatchModeDefault',
+               'hiddenFromCustomer',
+               'deprecated',
+               'legacySource',
+               'createdAt',
+               'updatedAt'
+             ]) &&
+             data.id is string && data.id.size() > 0 && data.id.size() < 100 &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.slug is string && data.slug.size() > 0 && data.slug.size() < 100 &&
+             (!('iconName' in data) || data.iconName is string) &&
+             (!('sortOrder' in data) || data.sortOrder is number) &&
+             (!('description' in data) || data.description is string) &&
+             (!('serviceAreaDefault' in data) || data.serviceAreaDefault in ['cafe', 'bakery']) &&
+             (!('frontLaneDefault' in data) || data.frontLaneDefault in ['cafe_front', 'bakery_front']) &&
+             (!('dispatchModeDefault' in data) || data.dispatchModeDefault in ['station_prep', 'front_only', 'bakery_front_only', 'mixed_split']) &&
+             (!('hiddenFromCustomer' in data) || data.hiddenFromCustomer is bool) &&
+             (!('deprecated' in data) || data.deprecated is bool) &&
+             (!('legacySource' in data) || data.legacySource is string) &&
+             (!('createdAt' in data) || data.createdAt is timestamp) &&
+             (!('updatedAt' in data) || data.updatedAt is timestamp) &&
+             data.active is bool;
+    }
+
+    function isValidBakeryItem(data) {
+      return data.keys().hasAll([
+               'id',
+               'name',
+               'slug',
+               'bakeryCategoryId',
+               'price',
+               'description',
+               'active',
+               'prepStation',
+               'fulfillmentMode',
+               'itemType'
+             ]) &&
+             data.keys().hasOnly([
+               'id',
+               'name',
+               'slug',
+               'bakeryCategoryId',
+               'bakeryCategoryName',
+               'price',
+               'description',
+               'imageUrl',
+               'active',
+               'sortOrder',
+               'prepStation',
+               'fulfillmentMode',
+               'itemType',
+               'serviceArea',
+               'sku',
+               'hiddenFromCustomer',
+               'deprecated',
+               'legacySource',
+               'variants',
+               'modifierGroups',
+               'prepInstructionsEnabled',
+               'prepInstructionsLabel',
+               'createdAt',
+               'updatedAt'
+             ]) &&
+             data.id is string && data.id.size() > 0 && data.id.size() < 120 &&
              data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
-             data.price is number && data.price >= 0 &&
+             data.slug is string && data.slug.size() > 0 && data.slug.size() < 200 &&
+             data.bakeryCategoryId is string && data.bakeryCategoryId.size() > 0 &&
+             (!('bakeryCategoryName' in data) || data.bakeryCategoryName is string) &&
+             (data.price == null || (data.price is number && data.price >= 0)) &&
+             data.description is string && data.description.size() > 0 &&
+             (!('imageUrl' in data) || data.imageUrl is string) &&
+             (!('sortOrder' in data) || data.sortOrder is number) &&
+             (!('serviceArea' in data) || data.serviceArea in ['cafe', 'bakery']) &&
+             (!('sku' in data) || data.sku is string) &&
+             (!('hiddenFromCustomer' in data) || data.hiddenFromCustomer is bool) &&
+             (!('deprecated' in data) || data.deprecated is bool) &&
+             (!('legacySource' in data) || data.legacySource is string) &&
+             (!('prepInstructionsEnabled' in data) || data.prepInstructionsEnabled is bool) &&
+             (!('prepInstructionsLabel' in data) || data.prepInstructionsLabel is string) &&
+             (!('createdAt' in data) || data.createdAt is timestamp) &&
+             (!('updatedAt' in data) || data.updatedAt is timestamp) &&
+             data.prepStation in ['kitchen', 'barista', 'front', 'none'] &&
+             data.fulfillmentMode in ['made_to_order', 'ready_to_serve'] &&
+             data.itemType in ['bread', 'whole_cake', 'slice', 'pastry', 'simple', 'variant', 'configurable', 'composite'] &&
+             (!('variants' in data) || data.variants is list) &&
+             (!('modifierGroups' in data) || data.modifierGroups is list) &&
+             data.active is bool;
+    }
+
+    function isValidMenuItem(data) {
+      return data.keys().hasAll(['name', 'category', 'categoryId', 'basePrice', 'active', 'available', 'isAvailable', 'station', 'itemType']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
+             data.category is string && data.category.size() > 0 &&
+             (data.basePrice == null || (data.basePrice is number && data.basePrice >= 0)) &&
              data.categoryId is string &&
+             data.active is bool &&
+             data.isAvailable is bool &&
              data.available is bool;
+    }
+
+    function isValidOrderItem(item) {
+      return item is map &&
+             item.keys().hasAll(['itemId', 'itemName', 'quantity', 'unitPrice', 'selectedOptions', 'lineTotal']) &&
+             item.keys().hasOnly(['itemId', 'itemName', 'quantity', 'unitPrice', 'selectedOptions', 'lineTotal', 'serviceArea', 'prepStation']) &&
+             item.itemId is string && item.itemId.size() > 0 &&
+             item.itemName is string && item.itemName.size() > 0 &&
+             item.quantity is number && item.quantity > 0 &&
+             item.unitPrice is number && item.unitPrice >= 0 &&
+             item.selectedOptions is list &&
+             item.lineTotal is number && item.lineTotal >= 0 &&
+             (!('serviceArea' in item) || item.serviceArea in ['cafe', 'bakery']) &&
+             (!('prepStation' in item) || item.prepStation in ['kitchen', 'barista']);
+    }
+
+    function isValidOrderTask(task) {
+      return task is map &&
+             task.keys().hasAll(['taskId', 'sourceItemId', 'sourceItemName', 'taskName', 'quantity', 'selectedOptions', 'prepStation']) &&
+             task.keys().hasOnly(['taskId', 'sourceItemId', 'sourceItemName', 'taskName', 'quantity', 'selectedOptions', 'prepStation']) &&
+             task.taskId is string && task.taskId.size() > 0 &&
+             task.sourceItemId is string && task.sourceItemId.size() > 0 &&
+             task.sourceItemName is string && task.sourceItemName.size() > 0 &&
+             task.taskName is string && task.taskName.size() > 0 &&
+             task.quantity is number && task.quantity > 0 &&
+             task.selectedOptions is list &&
+             task.prepStation in ['kitchen', 'barista'];
+    }
+
+    function isValidOrderCustomer(customer) {
+      return customer is map &&
+             customer.keys().hasAll(['name', 'phone']) &&
+             customer.keys().hasOnly(['name', 'phone', 'location']) &&
+             customer.name is string && customer.name.size() >= 3 &&
+             customer.phone is string && customer.phone.size() >= 10 &&
+             (!('location' in customer) || customer.location is string);
+    }
+
+    function hasValidOrderUserId(data) {
+      return !('userId' in data) ||
+             data.userId == null ||
+             (data.userId is string && isOwner(data.userId));
+    }
+
+    function isValidStationProgress(progress) {
+      return progress is map &&
+             progress.keys().hasAll(['status', 'updatedAt']) &&
+             progress.keys().hasOnly(['status', 'updatedAt', 'rejectionReason', 'acceptedBy', 'preparingBy', 'readyBy', 'rejectedBy']) &&
+             progress.status in ['queued', 'accepted', 'preparing', 'ready', 'rejected'] &&
+             progress.updatedAt is timestamp &&
+             (!('acceptedBy' in progress) || isValidStaffIdentity(progress.acceptedBy)) &&
+             (!('preparingBy' in progress) || isValidStaffIdentity(progress.preparingBy)) &&
+             (!('readyBy' in progress) || isValidStaffIdentity(progress.readyBy)) &&
+             (!('rejectedBy' in progress) || isValidStaffIdentity(progress.rejectedBy)) &&
+             (!('rejectionReason' in progress) ||
+              (progress.rejectionReason is string &&
+               progress.rejectionReason.size() > 0 &&
+               progress.rejectionReason.size() <= 200));
+    }
+
+    function isValidOrderStations(data) {
+      return (!('involvedStations' in data) ||
+              (data.involvedStations is list &&
+               data.involvedStations.size() <= 2 &&
+               (data.involvedStations.size() == 0 || data.involvedStations[0] in ['kitchen', 'barista']) &&
+               (data.involvedStations.size() < 2 || data.involvedStations[1] in ['kitchen', 'barista']))) &&
+             (!('stationStatus' in data) ||
+              (data.stationStatus is map &&
+               data.stationStatus.keys().hasOnly(['kitchen', 'barista']) &&
+               (!('kitchen' in data.stationStatus) || isValidStationProgress(data.stationStatus.kitchen)) &&
+               (!('barista' in data.stationStatus) || isValidStationProgress(data.stationStatus.barista))));
+    }
+
+    function isQueuedStationRecord(progress) {
+      return isValidStationProgress(progress) &&
+             progress.status == 'queued' &&
+             !('rejectionReason' in progress);
+    }
+
+    function hasQueuedStationsForInvolved(data) {
+      return (!data.involvedStations.hasAny(['kitchen']) ||
+              ('kitchen' in data.stationStatus && isQueuedStationRecord(data.stationStatus.kitchen))) &&
+             (!data.involvedStations.hasAny(['barista']) ||
+              ('barista' in data.stationStatus && isQueuedStationRecord(data.stationStatus.barista))) &&
+             (!('kitchen' in data.stationStatus) || data.involvedStations.hasAny(['kitchen'])) &&
+             (!('barista' in data.stationStatus) || data.involvedStations.hasAny(['barista']));
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll([
+               'createdAt',
+               'updatedAt',
+               'businessDate',
+               'status',
+               'paymentStatus',
+               'serviceMode',
+               'serviceArea',
+               'frontLane',
+               'dispatchMode',
+               'customer',
+               'items',
+               'subtotal',
+               'deliveryFee',
+               'total',
+               'notes',
+               'routedTasks',
+               'involvedStations',
+               'stationStatus',
+               'frontAcceptedBy',
+               'completedBy'
+             ]) &&
+             data.keys().hasOnly([
+               'createdAt',
+               'updatedAt',
+               'businessDate',
+               'status',
+               'paymentStatus',
+               'serviceMode',
+               'serviceArea',
+               'frontLane',
+               'dispatchMode',
+               'customer',
+               'items',
+               'subtotal',
+               'deliveryFee',
+               'total',
+               'notes',
+               'routedTasks',
+               'involvedStations',
+               'stationStatus',
+               'frontAcceptedBy',
+               'completedBy',
+               'userId',
+               'accountingTreatment',
+               'accountingReasonCode',
+               'accountingReasonNote',
+               'accountingUpdatedAt',
+               'accountingUpdatedBy',
+               'resolution',
+               'resolutionReason',
+               'resolutionUpdatedAt',
+               'resolutionUpdatedBy',
+               'originalBusinessDate',
+               'recoveryAction',
+               'recoveryReason',
+               'recoveryUpdatedAt',
+               'recoveryUpdatedBy'
+             ]) &&
+             data.createdAt is timestamp &&
+             data.updatedAt is timestamp &&
+             data.businessDate is string &&
+             data.businessDate.matches("^\\d{4}-\\d{2}-\\d{2}$") &&
+             data.status == 'pending' &&
+             data.paymentStatus == 'pending' &&
+             data.serviceMode in ['dine_in', 'pickup', 'delivery'] &&
+             data.serviceArea in ['cafe', 'bakery', 'mixed'] &&
+             data.frontLane in ['cafe_front', 'bakery_front'] &&
+             data.dispatchMode in ['station_prep', 'front_only', 'bakery_front_only', 'mixed_split'] &&
+             isValidOrderCustomer(data.customer) &&
+             data.items is list &&
+             data.items.size() > 0 &&
+             isValidOrderItem(data.items[0]) &&
+             data.subtotal is number && data.subtotal > 0 &&
+             data.deliveryFee is number && data.deliveryFee >= 0 &&
+             data.total is number && data.total > 0 &&
+             data.notes is string &&
+             (!('accountingTreatment' in data) || data.accountingTreatment in ['paid', 'complimentary', 'credit', 'cancelled', 'mixed_review']) &&
+             (!('accountingReasonCode' in data) || data.accountingReasonCode == null || data.accountingReasonCode in ['owner_use', 'complimentary_client', 'staff_meal', 'promo', 'replacement', 'credit_customer', 'pay_later', 'mixed_unresolved', 'other']) &&
+             (!('accountingReasonNote' in data) || data.accountingReasonNote is string) &&
+             (!('accountingUpdatedAt' in data) || data.accountingUpdatedAt is timestamp) &&
+             (!('accountingUpdatedBy' in data) || data.accountingUpdatedBy == null || isValidStaffIdentity(data.accountingUpdatedBy)) &&
+             (!('resolution' in data) || data.resolution in ['normal', 'forced_close']) &&
+             (!('resolutionReason' in data) || data.resolutionReason in ['day_close', 'stale_recovery_cancel']) &&
+             (!('resolutionUpdatedAt' in data) || data.resolutionUpdatedAt is timestamp) &&
+             (!('resolutionUpdatedBy' in data) || data.resolutionUpdatedBy == null || isValidStaffIdentity(data.resolutionUpdatedBy)) &&
+             (!('originalBusinessDate' in data) || (data.originalBusinessDate is string && data.originalBusinessDate.matches("^\\d{4}-\\d{2}-\\d{2}$"))) &&
+             (!('recoveryAction' in data) || data.recoveryAction in ['stale_complete', 'stale_cancel', 'stale_carry_forward']) &&
+             (!('recoveryReason' in data) || data.recoveryReason in ['stale_recovery_complete', 'stale_recovery_cancel', 'stale_recovery_carry_forward']) &&
+             (!('recoveryUpdatedAt' in data) || data.recoveryUpdatedAt is timestamp) &&
+             (!('recoveryUpdatedBy' in data) || data.recoveryUpdatedBy == null || isValidStaffIdentity(data.recoveryUpdatedBy)) &&
+             (!('frontAcceptedBy' in data) || data.frontAcceptedBy == null || isValidStaffIdentity(data.frontAcceptedBy)) &&
+             (!('completedBy' in data) || data.completedBy == null || isValidStaffIdentity(data.completedBy)) &&
+             (!('routedTasks' in data) ||
+              (data.routedTasks is list &&
+               (data.routedTasks.size() == 0 || isValidOrderTask(data.routedTasks[0])))) &&
+             isValidOrderStations(data) &&
+             hasValidOrderUserId(data);
+    }
+
+    function isValidOrderStatus(status) {
+      return status in ['pending', 'front_accepted', 'in_progress', 'ready_for_handover', 'completed', 'rejected'];
+    }
+
+    function isOrderCoreUnchanged() {
+      return request.resource.data.createdAt == resource.data.createdAt &&
+             request.resource.data.businessDate == resource.data.businessDate &&
+             request.resource.data.paymentStatus == resource.data.paymentStatus &&
+             request.resource.data.serviceMode == resource.data.serviceMode &&
+             request.resource.data.serviceArea == resource.data.serviceArea &&
+             request.resource.data.frontLane == resource.data.frontLane &&
+             request.resource.data.dispatchMode == resource.data.dispatchMode &&
+             request.resource.data.customer == resource.data.customer &&
+             request.resource.data.items == resource.data.items &&
+             request.resource.data.subtotal == resource.data.subtotal &&
+             request.resource.data.deliveryFee == resource.data.deliveryFee &&
+             request.resource.data.total == resource.data.total &&
+             request.resource.data.notes == resource.data.notes &&
+             request.resource.data.routedTasks == resource.data.routedTasks &&
+             request.resource.data.userId == resource.data.userId &&
+             request.resource.data.accountingTreatment == resource.data.accountingTreatment &&
+             request.resource.data.accountingReasonCode == resource.data.accountingReasonCode &&
+             request.resource.data.accountingReasonNote == resource.data.accountingReasonNote &&
+             request.resource.data.accountingUpdatedAt == resource.data.accountingUpdatedAt &&
+             request.resource.data.accountingUpdatedBy == resource.data.accountingUpdatedBy &&
+             request.resource.data.resolution == resource.data.resolution &&
+             request.resource.data.resolutionReason == resource.data.resolutionReason &&
+             request.resource.data.resolutionUpdatedAt == resource.data.resolutionUpdatedAt &&
+             request.resource.data.resolutionUpdatedBy == resource.data.resolutionUpdatedBy &&
+             request.resource.data.originalBusinessDate == resource.data.originalBusinessDate &&
+             request.resource.data.recoveryAction == resource.data.recoveryAction &&
+             request.resource.data.recoveryReason == resource.data.recoveryReason &&
+             request.resource.data.recoveryUpdatedAt == resource.data.recoveryUpdatedAt &&
+             request.resource.data.recoveryUpdatedBy == resource.data.recoveryUpdatedBy;
+    }
+
+    function isOrderIdentityUnchanged() {
+      return request.resource.data.frontAcceptedBy == resource.data.frontAcceptedBy &&
+             request.resource.data.completedBy == resource.data.completedBy;
+    }
+
+    function isValidAdminOrderUpdate() {
+      return request.resource.data.diff(resource.data).changedKeys().hasOnly(['status', 'updatedAt', 'stationStatus', 'involvedStations', 'frontAcceptedBy', 'completedBy']) &&
+             request.resource.data.status is string &&
+             isValidOrderStatus(request.resource.data.status) &&
+             request.resource.data.updatedAt is timestamp &&
+             isValidOrderStations(request.resource.data) &&
+             isOrderCoreUnchanged();
+    }
+
+    function isValidForcedDayCloseUpdate() {
+      return request.resource.data.diff(resource.data).changedKeys().hasOnly([
+               'status',
+               'updatedAt',
+               'accountingTreatment',
+               'accountingReasonCode',
+               'accountingReasonNote',
+               'accountingUpdatedAt',
+               'accountingUpdatedBy',
+               'resolution',
+               'resolutionReason',
+               'resolutionUpdatedAt',
+               'resolutionUpdatedBy'
+             ]) &&
+             request.resource.data.updatedAt is timestamp &&
+             request.resource.data.status == 'rejected' &&
+             request.resource.data.accountingTreatment == 'cancelled' &&
+             (!('accountingReasonCode' in request.resource.data) || request.resource.data.accountingReasonCode == null || request.resource.data.accountingReasonCode in ['owner_use', 'complimentary_client', 'staff_meal', 'promo', 'replacement', 'credit_customer', 'pay_later', 'mixed_unresolved', 'other']) &&
+             (!('accountingReasonNote' in request.resource.data) || request.resource.data.accountingReasonNote is string) &&
+             (!('accountingUpdatedAt' in request.resource.data) || request.resource.data.accountingUpdatedAt is timestamp) &&
+             (!('accountingUpdatedBy' in request.resource.data) || request.resource.data.accountingUpdatedBy == null || isValidStaffIdentity(request.resource.data.accountingUpdatedBy)) &&
+             request.resource.data.resolution == 'forced_close' &&
+             request.resource.data.resolutionReason == 'day_close' &&
+             request.resource.data.resolutionUpdatedAt is timestamp &&
+             (!('resolutionUpdatedBy' in request.resource.data) || request.resource.data.resolutionUpdatedBy == null || isValidStaffIdentity(request.resource.data.resolutionUpdatedBy)) &&
+             request.resource.data.createdAt == resource.data.createdAt &&
+             request.resource.data.businessDate == resource.data.businessDate &&
+             request.resource.data.paymentStatus == resource.data.paymentStatus &&
+             request.resource.data.serviceMode == resource.data.serviceMode &&
+             request.resource.data.serviceArea == resource.data.serviceArea &&
+             request.resource.data.frontLane == resource.data.frontLane &&
+             request.resource.data.dispatchMode == resource.data.dispatchMode &&
+             request.resource.data.customer == resource.data.customer &&
+             request.resource.data.items == resource.data.items &&
+             request.resource.data.subtotal == resource.data.subtotal &&
+             request.resource.data.deliveryFee == resource.data.deliveryFee &&
+             request.resource.data.total == resource.data.total &&
+             request.resource.data.notes == resource.data.notes &&
+             request.resource.data.routedTasks == resource.data.routedTasks &&
+             request.resource.data.involvedStations == resource.data.involvedStations &&
+             request.resource.data.stationStatus == resource.data.stationStatus &&
+             request.resource.data.frontAcceptedBy == resource.data.frontAcceptedBy &&
+             request.resource.data.completedBy == resource.data.completedBy &&
+             request.resource.data.userId == resource.data.userId;
+    }
+
+    function isValidStaleRecoveryUpdate() {
+      return request.resource.data.diff(resource.data).changedKeys().hasOnly([
+               'status',
+               'updatedAt',
+               'completedBy',
+               'involvedStations',
+               'stationStatus',
+               'accountingTreatment',
+               'accountingReasonCode',
+               'accountingReasonNote',
+               'accountingUpdatedAt',
+               'accountingUpdatedBy',
+               'resolution',
+               'resolutionReason',
+               'resolutionUpdatedAt',
+               'resolutionUpdatedBy',
+               'originalBusinessDate',
+               'recoveryAction',
+               'recoveryReason',
+               'recoveryUpdatedAt',
+               'recoveryUpdatedBy'
+             ]) &&
+             request.resource.data.updatedAt is timestamp &&
+             request.resource.data.createdAt == resource.data.createdAt &&
+             request.resource.data.businessDate == resource.data.businessDate &&
+             request.resource.data.paymentStatus == resource.data.paymentStatus &&
+             request.resource.data.serviceMode == resource.data.serviceMode &&
+             request.resource.data.serviceArea == resource.data.serviceArea &&
+             request.resource.data.frontLane == resource.data.frontLane &&
+             request.resource.data.dispatchMode == resource.data.dispatchMode &&
+             request.resource.data.customer == resource.data.customer &&
+             request.resource.data.items == resource.data.items &&
+             request.resource.data.subtotal == resource.data.subtotal &&
+             request.resource.data.deliveryFee == resource.data.deliveryFee &&
+             request.resource.data.total == resource.data.total &&
+             request.resource.data.notes == resource.data.notes &&
+             request.resource.data.routedTasks == resource.data.routedTasks &&
+             isValidOrderStations(request.resource.data) &&
+             request.resource.data.frontAcceptedBy == resource.data.frontAcceptedBy &&
+             request.resource.data.userId == resource.data.userId &&
+             (
+               (('businessDate' in resource.data) && request.resource.data.originalBusinessDate == resource.data.businessDate) ||
+               (!('businessDate' in resource.data) && request.resource.data.originalBusinessDate is string)
+             ) &&
+             request.resource.data.recoveryUpdatedAt is timestamp &&
+             (!('recoveryUpdatedBy' in request.resource.data) || request.resource.data.recoveryUpdatedBy == null || isValidStaffIdentity(request.resource.data.recoveryUpdatedBy)) &&
+             (
+               (
+                 resource.data.status in ['pending', 'front_accepted', 'in_progress', 'ready_for_handover'] &&
+                 resource.data.status == 'ready_for_handover' &&
+                 request.resource.data.status == 'completed' &&
+                 isCurrentUserIdentity(request.resource.data.completedBy) &&
+                 request.resource.data.involvedStations.size() == 0 &&
+                 request.resource.data.stationStatus.keys().size() == 0 &&
+                 request.resource.data.recoveryAction == 'stale_complete' &&
+                 request.resource.data.recoveryReason == 'stale_recovery_complete'
+               ) ||
+               (
+                 resource.data.status in ['pending', 'front_accepted', 'in_progress', 'ready_for_handover'] &&
+                 request.resource.data.status == 'rejected' &&
+                 request.resource.data.accountingTreatment == 'cancelled' &&
+                 request.resource.data.involvedStations.size() == 0 &&
+                 request.resource.data.stationStatus.keys().size() == 0 &&
+                 request.resource.data.resolution == 'forced_close' &&
+                 request.resource.data.resolutionReason == 'stale_recovery_cancel' &&
+                 request.resource.data.resolutionUpdatedAt is timestamp &&
+                 (!('resolutionUpdatedBy' in request.resource.data) || request.resource.data.resolutionUpdatedBy == null || isValidStaffIdentity(request.resource.data.resolutionUpdatedBy)) &&
+                 request.resource.data.recoveryAction == 'stale_cancel' &&
+                 request.resource.data.recoveryReason == 'stale_recovery_cancel'
+               )
+             );
+    }
+
+    function isValidFrontServiceUpdate() {
+      return request.resource.data.diff(resource.data).changedKeys().hasOnly(['status', 'updatedAt', 'stationStatus', 'involvedStations', 'frontAcceptedBy', 'completedBy']) &&
+             request.resource.data.updatedAt is timestamp &&
+             (
+               (isFrontService() && (!('frontLane' in resource.data) || resource.data.frontLane == 'cafe_front')) ||
+               (isBakeryFrontService() && ('frontLane' in resource.data && resource.data.frontLane == 'bakery_front'))
+             ) &&
+             isValidOrderStations(request.resource.data) &&
+             isOrderCoreUnchanged() &&
+             (
+               (resource.data.status == 'pending' &&
+                request.resource.data.status in ['front_accepted', 'ready_for_handover'] &&
+                isCurrentUserIdentity(request.resource.data.frontAcceptedBy) &&
+                request.resource.data.completedBy == resource.data.completedBy &&
+                hasQueuedStationsForInvolved(request.resource.data)) ||
+               (resource.data.status == 'ready_for_handover' &&
+                request.resource.data.status == 'completed' &&
+                isCurrentUserIdentity(request.resource.data.completedBy) &&
+                request.resource.data.frontAcceptedBy == resource.data.frontAcceptedBy &&
+                request.resource.data.stationStatus == resource.data.stationStatus &&
+                request.resource.data.involvedStations == resource.data.involvedStations)
+             );
+    }
+
+    function isValidKitchenUpdate() {
+      return request.resource.data.diff(resource.data).changedKeys().hasOnly(['status', 'updatedAt', 'stationStatus']) &&
+             request.resource.data.updatedAt is timestamp &&
+             isValidOrderStations(request.resource.data) &&
+             isOrderCoreUnchanged() &&
+             isOrderIdentityUnchanged() &&
+             request.resource.data.involvedStations == resource.data.involvedStations &&
+             resource.data.involvedStations.hasAny(['kitchen']) &&
+             request.resource.data.stationStatus.barista == resource.data.stationStatus.barista &&
+             (
+               (resource.data.stationStatus.kitchen.status == 'queued' &&
+                request.resource.data.stationStatus.kitchen.status == 'accepted' &&
+                !('rejectionReason' in request.resource.data.stationStatus.kitchen) &&
+                isCurrentUserIdentity(request.resource.data.stationStatus.kitchen.acceptedBy) &&
+                request.resource.data.status in ['front_accepted', 'in_progress']) ||
+               (resource.data.stationStatus.kitchen.status == 'queued' &&
+                request.resource.data.stationStatus.kitchen.status == 'rejected' &&
+                isCurrentUserIdentity(request.resource.data.stationStatus.kitchen.rejectedBy) &&
+                'rejectionReason' in request.resource.data.stationStatus.kitchen &&
+                request.resource.data.status == 'rejected') ||
+               (resource.data.stationStatus.kitchen.status == 'accepted' &&
+                request.resource.data.stationStatus.kitchen.status == 'preparing' &&
+                !('rejectionReason' in request.resource.data.stationStatus.kitchen) &&
+                isCurrentUserIdentity(request.resource.data.stationStatus.kitchen.preparingBy) &&
+                request.resource.data.status == 'in_progress') ||
+               (resource.data.stationStatus.kitchen.status == 'accepted' &&
+                request.resource.data.stationStatus.kitchen.status == 'rejected' &&
+                isCurrentUserIdentity(request.resource.data.stationStatus.kitchen.rejectedBy) &&
+                'rejectionReason' in request.resource.data.stationStatus.kitchen &&
+                request.resource.data.status == 'rejected') ||
+               (resource.data.stationStatus.kitchen.status == 'preparing' &&
+                request.resource.data.stationStatus.kitchen.status == 'ready' &&
+                !('rejectionReason' in request.resource.data.stationStatus.kitchen) &&
+                isCurrentUserIdentity(request.resource.data.stationStatus.kitchen.readyBy) &&
+                request.resource.data.status in ['in_progress', 'ready_for_handover'])
+             );
+    }
+
+    function isValidBaristaUpdate() {
+      return request.resource.data.diff(resource.data).changedKeys().hasOnly(['status', 'updatedAt', 'stationStatus']) &&
+             request.resource.data.updatedAt is timestamp &&
+             isValidOrderStations(request.resource.data) &&
+             isOrderCoreUnchanged() &&
+             isOrderIdentityUnchanged() &&
+             request.resource.data.involvedStations == resource.data.involvedStations &&
+             resource.data.involvedStations.hasAny(['barista']) &&
+             request.resource.data.stationStatus.kitchen == resource.data.stationStatus.kitchen &&
+             (
+               (resource.data.stationStatus.barista.status == 'queued' &&
+                request.resource.data.stationStatus.barista.status == 'accepted' &&
+                !('rejectionReason' in request.resource.data.stationStatus.barista) &&
+                isCurrentUserIdentity(request.resource.data.stationStatus.barista.acceptedBy) &&
+                request.resource.data.status in ['front_accepted', 'in_progress']) ||
+               (resource.data.stationStatus.barista.status == 'queued' &&
+                request.resource.data.stationStatus.barista.status == 'rejected' &&
+                isCurrentUserIdentity(request.resource.data.stationStatus.barista.rejectedBy) &&
+                'rejectionReason' in request.resource.data.stationStatus.barista &&
+                request.resource.data.status == 'rejected') ||
+               (resource.data.stationStatus.barista.status == 'accepted' &&
+                request.resource.data.stationStatus.barista.status == 'preparing' &&
+                !('rejectionReason' in request.resource.data.stationStatus.barista) &&
+                isCurrentUserIdentity(request.resource.data.stationStatus.barista.preparingBy) &&
+                request.resource.data.status == 'in_progress') ||
+               (resource.data.stationStatus.barista.status == 'accepted' &&
+                request.resource.data.stationStatus.barista.status == 'rejected' &&
+                isCurrentUserIdentity(request.resource.data.stationStatus.barista.rejectedBy) &&
+                'rejectionReason' in request.resource.data.stationStatus.barista &&
+                request.resource.data.status == 'rejected') ||
+               (resource.data.stationStatus.barista.status == 'preparing' &&
+                request.resource.data.stationStatus.barista.status == 'ready' &&
+                !('rejectionReason' in request.resource.data.stationStatus.barista) &&
+                isCurrentUserIdentity(request.resource.data.stationStatus.barista.readyBy) &&
+                request.resource.data.status in ['in_progress', 'ready_for_handover'])
+             );
+    }
+
+    function isValidAccountingTreatmentUpdate() {
+      return request.resource.data.diff(resource.data).changedKeys().hasOnly([
+               'accountingTreatment',
+               'accountingReasonCode',
+               'accountingReasonNote',
+               'accountingUpdatedAt',
+               'accountingUpdatedBy',
+               'updatedAt'
+             ]) &&
+             request.resource.data.updatedAt is timestamp &&
+             request.resource.data.accountingTreatment in ['paid', 'complimentary', 'credit', 'cancelled', 'mixed_review'] &&
+             (!('accountingReasonCode' in request.resource.data) || request.resource.data.accountingReasonCode == null || request.resource.data.accountingReasonCode in ['owner_use', 'complimentary_client', 'staff_meal', 'promo', 'replacement', 'credit_customer', 'pay_later', 'mixed_unresolved', 'other']) &&
+             (!('accountingReasonNote' in request.resource.data) || request.resource.data.accountingReasonNote is string) &&
+             (!('accountingUpdatedAt' in request.resource.data) || request.resource.data.accountingUpdatedAt is timestamp) &&
+             (!('accountingUpdatedBy' in request.resource.data) || request.resource.data.accountingUpdatedBy == null || isValidStaffIdentity(request.resource.data.accountingUpdatedBy)) &&
+             request.resource.data.createdAt == resource.data.createdAt &&
+             request.resource.data.businessDate == resource.data.businessDate &&
+             request.resource.data.status == resource.data.status &&
+             request.resource.data.paymentStatus == resource.data.paymentStatus &&
+             request.resource.data.serviceMode == resource.data.serviceMode &&
+             request.resource.data.serviceArea == resource.data.serviceArea &&
+             request.resource.data.frontLane == resource.data.frontLane &&
+             request.resource.data.dispatchMode == resource.data.dispatchMode &&
+             request.resource.data.customer == resource.data.customer &&
+             request.resource.data.items == resource.data.items &&
+             request.resource.data.subtotal == resource.data.subtotal &&
+             request.resource.data.deliveryFee == resource.data.deliveryFee &&
+             request.resource.data.total == resource.data.total &&
+             request.resource.data.notes == resource.data.notes &&
+             request.resource.data.routedTasks == resource.data.routedTasks &&
+             request.resource.data.involvedStations == resource.data.involvedStations &&
+             request.resource.data.stationStatus == resource.data.stationStatus &&
+             request.resource.data.frontAcceptedBy == resource.data.frontAcceptedBy &&
+             request.resource.data.completedBy == resource.data.completedBy &&
+             request.resource.data.resolution == resource.data.resolution &&
+             request.resource.data.resolutionReason == resource.data.resolutionReason &&
+             request.resource.data.resolutionUpdatedAt == resource.data.resolutionUpdatedAt &&
+             request.resource.data.resolutionUpdatedBy == resource.data.resolutionUpdatedBy &&
+             request.resource.data.originalBusinessDate == resource.data.originalBusinessDate &&
+             request.resource.data.recoveryAction == resource.data.recoveryAction &&
+             request.resource.data.recoveryReason == resource.data.recoveryReason &&
+             request.resource.data.recoveryUpdatedAt == resource.data.recoveryUpdatedAt &&
+             request.resource.data.recoveryUpdatedBy == resource.data.recoveryUpdatedBy &&
+             request.resource.data.userId == resource.data.userId;
     }
 
     // ===============================================================
@@ -107,17 +828,80 @@ service cloud.firestore {
     }
 
     // Publicly readable menu items
-    match /menuItems/{itemId} {
+    match /menu/{itemId} {
       allow read: if true;
       allow write: if isAdmin() && isValidMenuItem(request.resource.data);
     }
 
+    // Publicly readable bakery categories
+    match /bakeryCategories/{categoryId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidBakeryCategory(request.resource.data);
+    }
+
+    // Publicly readable bakery items
+    match /bakeryItems/{itemId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidBakeryItem(request.resource.data);
+    }
+
     // User profiles
     match /users/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
-      allow create: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == 'user';
-      allow update: if isAuthenticated() && isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == resource.data.role;
+      allow read: if isOwner(userId) ||
+        isAdmin() ||
+        (isAuthenticated() &&
+          ((hasValidEmail(resource.data) && request.auth.token.email != null && request.auth.token.email == resource.data.email) ||
+           (hasValidPhoneNumber(resource.data) && request.auth.token.phone_number != null && request.auth.token.phone_number == resource.data.phoneNumber)));
+      allow create: if isAuthenticated() &&
+        isOwner(userId) &&
+        isValidUser(request.resource.data) &&
+        request.resource.data.uid == userId &&
+        matchesAuthIdentifier(request.resource.data) &&
+        (
+          request.resource.data.role == 'user' ||
+          (request.resource.data.role == 'admin' && isBootstrapAdmin())
+        );
+      allow update: if isAuthenticated() &&
+        isOwner(userId) &&
+        isValidUser(request.resource.data) &&
+        request.resource.data.uid == userId &&
+        matchesAuthIdentifier(request.resource.data) &&
+        request.resource.data.role == resource.data.role;
       allow write: if isAdmin();
+    }
+
+    match /orders/{orderId} {
+      allow create: if isValidOrder(request.resource.data);
+      allow read: if canReadOperationalOrders() ||
+        (resource.data.userId is string && isOwner(resource.data.userId));
+      allow update: if (isAdmin() && isValidAdminOrderUpdate()) ||
+        (isAdmin() && isValidForcedDayCloseUpdate()) ||
+        (isAdmin() && isValidStaleRecoveryUpdate()) ||
+        ((isAdmin() || isBakeryAccountReconciliation() || isCafeAccountReconciliation()) && isValidAccountingTreatmentUpdate()) ||
+        ((isFrontService() || isBakeryFrontService()) && isValidFrontServiceUpdate()) ||
+        (isKitchen() && isValidKitchenUpdate()) ||
+        (isBarista() && isValidBaristaUpdate());
+      allow delete: if isAdmin();
+    }
+
+    match /bakeryStockLedger/{entryId} {
+      allow read: if isAdmin() || isBakeryAccountReconciliation() || isCafeAccountReconciliation();
+      allow write: if isAdmin() || isBakeryAccountReconciliation();
+    }
+
+    match /bakeryDailyReconciliation/{docId} {
+      allow read: if isAdmin() || isBakeryAccountReconciliation() || isCafeAccountReconciliation();
+      allow write: if isAdmin() || isBakeryAccountReconciliation();
+    }
+
+    match /cafeDailyReconciliation/{docId} {
+      allow read: if isAdmin() || isBakeryAccountReconciliation() || isCafeAccountReconciliation();
+      allow write: if isAdmin() || isCafeAccountReconciliation();
+    }
+
+    match /bakeryStockSnapshots/{docId} {
+      allow read: if isAdmin() || isBakeryAccountReconciliation() || isCafeAccountReconciliation();
+      allow write: if isAdmin() || isBakeryAccountReconciliation();
     }
 
     // Default deny

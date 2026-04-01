@@ -4,6 +4,13 @@ import { Search, ChevronRight, MessageCircle, Sparkles, Clock, Plus, History, X,
 import { CONTACT_INFO } from '../constants';
 import { Category, MenuItem, ItemCustomization, HistoricalOrder } from '../types';
 import { CustomizerModal } from '../components/CustomizerModal';
+import { SafeImage } from '../components/SafeImage';
+import {
+  getMenuItemCategoryId,
+  getMenuItemCategoryName,
+  getMenuItemPriceLabel,
+  getMenuItemPrimaryImage,
+} from '../lib/catalog';
 
 interface HomeViewProps {
   onCategorySelect: (cat: Category) => void;
@@ -83,10 +90,10 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
 
   const baristaChoices = useMemo(() => {
     const coffeeCat = categories.find(c => c.name === "Coffee & Espresso")?.id;
-    const cocktailCat = categories.find(c => c.name === "Café Signature Cocktails")?.id;
+    const cocktailCat = categories.find(c => c.name === "Cocktails & Wines" || c.name === "Café Signature Cocktails")?.id;
     
-    const coffees = menuItems.filter(i => i.category === coffeeCat).slice(0, 2);
-    const cocktails = menuItems.filter(i => i.category === cocktailCat).slice(0, 2);
+    const coffees = menuItems.filter(i => getMenuItemCategoryId(i) === coffeeCat).slice(0, 2);
+    const cocktails = menuItems.filter(i => getMenuItemCategoryId(i) === cocktailCat).slice(0, 2);
     return [...coffees, ...cocktails];
   }, [menuItems, categories]);
 
@@ -182,7 +189,7 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
                       className="flex-1 flex items-center gap-4 text-left min-w-0"
                     >
                       <div className="w-12 h-12 bg-[var(--color-bg-secondary)] rounded-2xl flex items-center justify-center text-[var(--color-text)] shrink-0 group-hover:bg-[var(--color-primary)] group-hover:text-white transition-colors">
-                        {getCategoryIcon(item.category)}
+                        {getCategoryIcon(getMenuItemCategoryId(item))}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
@@ -193,10 +200,10 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
                              </div>
                           )}
                         </div>
-                        <p className="text-[9px] text-[var(--color-text-muted)] font-bold uppercase tracking-widest">{getCategoryName(item.category)}</p>
+                        <p className="text-[9px] text-[var(--color-text-muted)] font-bold uppercase tracking-widest">{getMenuItemCategoryName(item, categories)}</p>
                       </div>
                       <div className="text-right mr-8">
-                        <p className="text-xs font-black text-[var(--color-primary)] whitespace-nowrap">{item.price.toLocaleString()} RWF</p>
+                        <p className="text-xs font-black text-[var(--color-primary)] whitespace-nowrap">{getMenuItemPriceLabel(item)}</p>
                       </div>
                     </button>
                     <button 
@@ -276,17 +283,15 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
               className="min-w-[280px] bg-[var(--color-bg)] rounded-[40px] shadow-lg border border-[var(--color-primary)]/10 overflow-hidden flex flex-col group active:scale-[0.98] transition-all relative hover:shadow-2xl hover:-translate-y-1"
             >
               <div className="h-44 relative overflow-hidden" onClick={() => setCustomizingItem(item)}>
-                <img 
-                  src={item.category === 'Café Signature Cocktails' 
-                    ? "https://images.unsplash.com/photo-1545438102-799c3991ffb2?auto=format&fit=crop&q=80&w=400" 
-                    : "https://images.unsplash.com/photo-1509042239860-f550ce710b93?auto=format&fit=crop&q=80&w=400"
-                  } 
-                  alt={item.name} 
+                <SafeImage
+                  src={getMenuItemPrimaryImage(item, categories)}
+                  alt={item.name}
                   className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+                  fallbackLabel="KUCI"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-[var(--color-text)]/60 via-transparent to-transparent opacity-60" />
                 <div className="absolute top-4 left-4 bg-[var(--color-primary)] text-white px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest">
-                  {item.category.replace('Café ', '')}
+                  {getMenuItemCategoryName(item, categories).replace('Café ', '')}
                 </div>
                 {item.averageRating && (
                   <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-[var(--color-bg)]/90 backdrop-blur-sm px-3 py-1 rounded-full flex items-center gap-1 shadow-lg">
@@ -295,7 +300,7 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
                   </div>
                 )}
                 <div className="absolute bottom-4 right-4 bg-[var(--color-bg)]/95 backdrop-blur-md px-3 py-1.5 rounded-full text-[var(--color-text)] font-black text-xs shadow-md">
-                  {item.price.toLocaleString()} RWF
+                  {getMenuItemPriceLabel(item)}
                 </div>
               </div>
 
@@ -332,9 +337,14 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
               className="min-w-[280px] bg-[var(--color-bg)] rounded-[40px] shadow-xl border border-[var(--color-border)]/50 overflow-hidden flex flex-col relative active:scale-[0.98] transition-all hover:-translate-y-1"
             >
               <div className="h-44 relative" onClick={() => setCustomizingItem(item)}>
-                <img src={`https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&q=80&w=400`} className="w-full h-full object-cover" alt={item.name} />
+                <SafeImage
+                  src={getMenuItemPrimaryImage(item, categories)}
+                  className="w-full h-full object-cover"
+                  alt={item.name}
+                  fallbackLabel="KUCI"
+                />
                 <div className="absolute top-4 right-4 bg-[var(--color-bg)]/95 backdrop-blur-md px-4 py-1.5 rounded-full text-[var(--color-primary)] font-black text-xs shadow-lg">
-                  {item.price.toLocaleString()} RWF
+                  {getMenuItemPriceLabel(item)}
                 </div>
                 {item.averageRating && (
                   <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-[var(--color-primary)] px-3 py-1 rounded-full flex items-center gap-1 shadow-xl">
@@ -388,9 +398,9 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
                 onClick={() => setCustomizingItem(item)}
               >
                 <div className="h-28 relative bg-[var(--color-bg-secondary)] flex items-center justify-center text-[var(--color-primary)]">
-                  {getCategoryIcon(item.category)}
+                  {getCategoryIcon(getMenuItemCategoryId(item))}
                   <div className="absolute top-2 right-2 bg-[var(--color-bg)]/90 px-2 py-0.5 rounded-full text-[8px] font-black text-[var(--color-primary)] shadow-sm">
-                    {item.price.toLocaleString()} RWF
+                    {getMenuItemPriceLabel(item)}
                   </div>
                 </div>
                 <div className="p-4 flex flex-col flex-1">
@@ -403,7 +413,7 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
                   </div>
                     )}
                   </div>
-                  <p className="text-[9px] text-[var(--color-text)]/40 mt-1 line-clamp-1 italic">"{getCategoryName(item.category)}"</p>
+                  <p className="text-[9px] text-[var(--color-text)]/40 mt-1 line-clamp-1 italic">"{getMenuItemCategoryName(item, categories)}"</p>
                   <button 
                     className="mt-3 w-full bg-[var(--color-primary)]/10 text-[var(--color-primary)] py-2 rounded-xl text-[8px] font-black uppercase tracking-widest flex items-center justify-center gap-1.5"
                   >

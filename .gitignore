@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# Firebase Functions compiled output
+functions/lib
+
+# Stale AI Studio config — do NOT use for app config (wrong project)
+firebase-applet-config.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

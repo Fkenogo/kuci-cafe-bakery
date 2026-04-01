@@ -6,17 +6,22 @@
       "type": "object",
       "properties": {
         "name": { "type": "string" },
+        "tagline": { "type": "string" },
+        "description": { "type": "string" },
         "logo": { "type": "string" },
+        "active": { "type": "boolean" },
         "contactInfo": {
           "type": "object",
           "properties": {
             "phone": { "type": "string" },
             "whatsapp": { "type": "string" },
+            "email": { "type": "string" },
             "location": { "type": "string" },
             "mapLink": { "type": "string" },
             "contactPerson": { "type": "string" },
-            "paybill": { "type": "string" },
-            "vendor": { "type": "string" }
+            "momoPayCode": { "type": "string" },
+            "momoMerchantName": { "type": "string" },
+            "hours": { "type": "string" }
           }
         },
         "colors": {
@@ -45,6 +50,14 @@
               "estimatedTime": { "type": "string" }
             }
           }
+        },
+        "paymentMethods": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "socialLinks": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
         },
         "customizationOptions": {
           "type": "object",
@@ -79,15 +92,63 @@
         "name": { "type": "string" },
         "description": { "type": "string" },
         "tagline": { "type": "string" },
-        "price": { "type": "integer" },
-        "currency": { "type": "string" },
         "categoryId": { "type": "string" },
+        "categoryName": { "type": "string" },
+        "basePrice": { "type": "integer" },
         "imageUrl": { "type": "string" },
+        "active": { "type": "boolean" },
         "available": { "type": "boolean" },
+        "station": { "type": "string", "enum": ["kitchen", "bakery", "bar", "coffee"] },
+        "itemType": { "type": "string", "enum": ["simple", "variant", "customizable", "combo"] },
         "featured": { "type": "boolean" },
         "sortOrder": { "type": "integer" },
         "note": { "type": "string" },
         "averageRating": { "type": "number" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "variants": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "price": { "type": "integer" },
+              "active": { "type": "boolean" },
+              "description": { "type": "string" },
+              "isDefault": { "type": "boolean" }
+            }
+          }
+        },
+        "modifierGroups": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "selectionType": { "type": "string", "enum": ["single", "multiple"] },
+              "required": { "type": "boolean" },
+              "minSelections": { "type": "integer" },
+              "maxSelections": { "type": "integer" },
+              "includedInPrice": { "type": "boolean" },
+              "options": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "name": { "type": "string" },
+                    "priceDelta": { "type": "integer" },
+                    "active": { "type": "boolean" },
+                    "description": { "type": "string" },
+                    "isDefault": { "type": "boolean" },
+                    "tags": { "type": "array", "items": { "type": "string" } }
+                  }
+                }
+              }
+            }
+          }
+        },
         "reviews": {
           "type": "array",
           "items": {
@@ -101,7 +162,7 @@
           }
         }
       },
-      "required": ["name", "price", "categoryId", "available"]
+      "required": ["name", "categoryId", "basePrice", "active", "available", "station", "itemType"]
     }
   },
   "firestore": {

@@ -3,6 +3,7 @@ import React, { useState, useMemo } from 'react';
 import { Plus, Info, Heart, Star, Utensils, Coffee, Pizza, Wine, GlassWater, Sandwich, Flame, Milk, Cherry, IceCream, Salad, Beer } from 'lucide-react';
 import { Category, MenuItem, ItemCustomization } from '../types';
 import { CustomizerModal } from '../components/CustomizerModal';
+import { getMenuItemCategoryId, getMenuItemPriceLabel } from '../lib/catalog';
 
 interface MenuViewProps {
   addToCart: (item: MenuItem, customization?: ItemCustomization) => void;
@@ -46,7 +47,7 @@ export const MenuView: React.FC<MenuViewProps> = ({
 
   const filteredItems = useMemo(() => {
     if (!activeCategory) return [];
-    return menuItems.filter(item => item.category === activeCategory.id);
+    return menuItems.filter(item => getMenuItemCategoryId(item) === activeCategory.id);
   }, [activeCategory, menuItems]);
 
   const handleCustomizationConfirm = (item: MenuItem, customization: ItemCustomization) => {
@@ -123,7 +124,7 @@ export const MenuView: React.FC<MenuViewProps> = ({
                   </div>
                   <div className="flex flex-col items-end gap-2">
                     <span className="font-bold text-[var(--color-primary)] whitespace-nowrap">
-                      {item.price.toLocaleString()} RWF
+                      {getMenuItemPriceLabel(item)}
                     </span>
                     <button 
                       onClick={() => toggleWishlist(item)}

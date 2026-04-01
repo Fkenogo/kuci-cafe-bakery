@@ -1,20 +1,60 @@
 
 import React, { useState, useEffect } from 'react';
-import { Home, Menu as MenuIcon, Cookie, ShoppingBag, Info, User } from 'lucide-react';
+import { LucideIcon, User } from 'lucide-react';
 import { Auth } from './Auth';
 import { User as FirebaseUser } from 'firebase/auth';
+import { AppUserRecord } from '../types';
+
+export interface LayoutTab {
+  path: string;
+  icon: LucideIcon;
+  label: string;
+  badge?: number;
+}
 
 interface LayoutProps {
   children: React.ReactNode;
-  activeTab: string;
-  setActiveTab: (tab: string) => void;
+  activePath: string;
+  navigate: (path: string) => void;
+  tabs: LayoutTab[];
   cartCount: number;
   userPhoto?: string;
   user: FirebaseUser | null;
+  appUser?: AppUserRecord | null;
+  managementViewMode?: 'auto' | 'mobile' | 'desktop';
+  onManagementViewModeChange?: (mode: 'auto' | 'mobile' | 'desktop') => void;
+  showManagementViewControls?: boolean;
+  onOpenSignIn?: () => void;
 }
 
-export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab, cartCount, userPhoto, user }) => {
+export const Layout: React.FC<LayoutProps> = ({
+  children,
+  activePath,
+  navigate,
+  tabs,
+  cartCount,
+  userPhoto,
+  user,
+  appUser,
+  managementViewMode = 'auto',
+  onManagementViewModeChange,
+  showManagementViewControls = false,
+  onOpenSignIn,
+}) => {
   const [isBouncing, setIsBouncing] = useState(false);
+  const [isDesktopViewport, setIsDesktopViewport] = useState(false);
+
+  useEffect(() => {
+    const syncViewport = () => setIsDesktopViewport(window.innerWidth >= 1024);
+    syncViewport();
+    window.addEventListener('resize', syncViewport);
+    return () => window.removeEventListener('resize', syncViewport);
+  }, []);
+
+  const resolvedManagementMode = managementViewMode === 'auto'
+    ? (isDesktopViewport ? 'desktop' : 'mobile')
+    : managementViewMode;
+  const isDesktopManagementShell = showManagementViewControls && resolvedManagementMode === 'desktop';
 
   // Trigger animation when cart count increases
   useEffect(() => {
@@ -25,16 +65,10 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTa
     }
   }, [cartCount]);
 
-  const tabs = [
-    { id: 'home', icon: Home, label: 'Home' },
-    { id: 'menu', icon: MenuIcon, label: 'Menu' },
-    { id: 'bakery', icon: Cookie, label: 'Bakery' },
-    { id: 'orders', icon: ShoppingBag, label: 'Orders', badge: cartCount },
-    { id: 'info', icon: Info, label: 'Info' },
-  ];
-
   return (
-    <div className="flex flex-col min-h-screen max-w-md mx-auto relative bg-[var(--color-bg)] shadow-xl overflow-x-hidden">
+    <div className={`flex flex-col min-h-screen mx-auto relative bg-[var(--color-bg)] overflow-x-hidden ${
+      isDesktopManagementShell ? 'max-w-[1440px] shadow-none' : 'max-w-md shadow-xl'
+    }`}>
       {/* Top Header */}
       <header className="sticky top-0 z-40 bg-[var(--color-bg)]/95 backdrop-blur-md px-4 py-3 flex items-center justify-between border-b border-[var(--color-bg-secondary)]">
         <div className="flex items-center gap-2">
@@ -45,40 +79,70 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTa
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <Auth user={user} />
-          <button 
-            onClick={() => setActiveTab('profile')}
-            className={`w-10 h-10 rounded-full flex items-center justify-center transition-all overflow-hidden border-2 shadow-sm ${
-              activeTab === 'profile' 
-                ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/10 ring-4 ring-[var(--color-primary)]/5' 
-                : 'border-transparent hover:bg-[var(--color-primary)]/5 bg-[var(--color-bg-secondary)]/50'
-            }`}
-          >
-            {userPhoto ? (
-              <img src={userPhoto} alt="Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-            ) : (
-              <User className={`w-5 h-5 ${activeTab === 'profile' ? 'text-[var(--color-primary)]' : 'text-[var(--color-text)]'}`} />
-            )}
-          </button>
+          <Auth user={user} appUser={appUser} onOpenSignIn={onOpenSignIn} />
+          {user && (
+            <button 
+              onClick={() => navigate('/profile')}
+              className={`w-10 h-10 rounded-full flex items-center justify-center transition-all overflow-hidden border-2 shadow-sm ${
+                activePath === '/profile' 
+                  ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/10 ring-4 ring-[var(--color-primary)]/5' 
+                  : 'border-transparent hover:bg-[var(--color-primary)]/5 bg-[var(--color-bg-secondary)]/50'
+              }`}
+            >
+              {userPhoto ? (
+                <img src={userPhoto} alt="Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+              ) : (
+                <User className={`w-5 h-5 ${activePath === '/profile' ? 'text-[var(--color-primary)]' : 'text-[var(--color-text)]'}`} />
+              )}
+            </button>
+          )}
         </div>
       </header>
 
+      {showManagementViewControls && onManagementViewModeChange && (
+        <div className={`sticky top-[72px] z-30 border-b border-[var(--color-bg-secondary)] bg-white/95 backdrop-blur px-4 py-2 flex items-center justify-between ${
+          isDesktopManagementShell ? 'max-w-[1440px] mx-auto w-full' : ''
+        }`}>
+          <p className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">Management View</p>
+          <div className="inline-flex rounded-full border border-[var(--color-border)] bg-[var(--color-bg)] p-1">
+            {(['auto', 'mobile', 'desktop'] as const).map((mode) => {
+              const isActive = managementViewMode === mode;
+              return (
+                <button
+                  key={mode}
+                  onClick={() => onManagementViewModeChange(mode)}
+                  className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest transition-colors ${
+                    isActive
+                      ? 'bg-[var(--color-primary)] text-white'
+                      : 'text-[var(--color-text-muted)]'
+                  }`}
+                >
+                  {mode}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Main Content */}
-      <main className="flex-1 pb-24 overflow-y-auto no-scrollbar">
+      <main className={`flex-1 pb-24 overflow-y-auto no-scrollbar ${isDesktopManagementShell ? 'px-2 md:px-6' : ''}`}>
         {children}
       </main>
 
       {/* Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white border-t border-[var(--color-bg-secondary)] z-50 safe-bottom">
+      <nav className={`fixed bottom-0 left-0 right-0 mx-auto bg-white border-t border-[var(--color-bg-secondary)] z-50 safe-bottom ${
+        isDesktopManagementShell ? 'max-w-[1440px]' : 'max-w-md'
+      }`}>
         <div className="flex items-center justify-around py-2 px-1">
           {tabs.map((tab) => {
-            const isActive = activeTab === tab.id;
-            const isCart = tab.id === 'orders';
+            const isActive = activePath === tab.path;
+            const isCart = tab.path === '/orders';
             const Icon = tab.icon;
             return (
               <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                key={tab.path}
+                onClick={() => navigate(tab.path)}
                 className={`flex flex-col items-center justify-center w-16 h-14 relative transition-all ${
                   isActive ? 'text-[var(--color-primary)]' : 'text-[var(--color-text-muted)]'
                 } ${isCart && isBouncing ? 'animate-cart-pop' : ''}`}

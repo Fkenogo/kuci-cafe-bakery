@@ -17,9 +17,9 @@ import {
   Flame as SizzlingIcon,
   CupSoda,
   Beer,
-  Waves
+  Cake,
 } from 'lucide-react';
-import { MenuItem, CategoryName, DeliveryArea, DeliveryInfo } from './types';
+import { MenuItem, DeliveryArea, DeliveryInfo } from './types';
 
 export const COLORS = {
   primary: '#f97316', // Warm Orange
@@ -53,11 +53,12 @@ export const CUSTOMIZATION_OPTIONS = {
 export const CONTACT_INFO = {
   phone: '+250795306488',
   whatsapp: '+250783959404',
+  email: 'hello@kuci.rw',
   location: 'Nyamata, Bugesera, Rwanda (Opposite AFOS Bugesera)',
   mapLink: "https://www.google.com/maps/place/2%C2%B008'46.6%22S+30%C2%B005'20.0%22E/@-2.146271,30.086319,17z/data=!3m1!4b1!4m4!3m3!8m2!3d-2.146271!4d30.0888939?hl=en&entry=ttu",
   contactPerson: 'Lorraine Ingabire',
-  paybill: '6482249',
-  vendor: 'KUCI HOLDINGS'
+  momoPayCode: '6482249',
+  momoMerchantName: 'KUCI HOLDINGS'
 };
 
 export const DELIVERY_OPTIONS: Record<DeliveryArea, DeliveryInfo> = {
@@ -80,6 +81,7 @@ export const DELIVERY_OPTIONS: Record<DeliveryArea, DeliveryInfo> = {
 
 export const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   "Signature Meals": <Utensils className="w-5 h-5" />,
+  "Breakfast": <Coffee className="w-5 h-5" />,
   "Kuci Omelettes": <Utensils className="w-5 h-5" />,
   "Kuci Salads": <Salad className="w-5 h-5" />,
   "Kuci Desserts": <IceCream className="w-5 h-5" />,
@@ -91,9 +93,11 @@ export const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   "Kuci Sizzling": <SizzlingIcon className="w-5 h-5" />,
   "Kuci Toast": <Utensils className="w-5 h-5" />,
   "Kuci Pizza": <Pizza className="w-5 h-5" />,
+  "Pizza": <Pizza className="w-5 h-5" />,
   "Fresh Juice": <Cherry className="w-5 h-5" />,
   "Café Signature Cocktails": <Wine className="w-5 h-5" />,
   "Kuci Wines & Spirits": <Beer className="w-5 h-5" />,
+  "Cocktails & Wines": <Wine className="w-5 h-5" />,
   "Beverages": <GlassWater className="w-5 h-5" />,
   "Smoothies": <Milk className="w-5 h-5" />,
   "Frappe": <Coffee className="w-5 h-5" />,
@@ -103,11 +107,19 @@ export const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   "Kuci Breakfast": <Coffee className="w-5 h-5" />,
   "Coffee & Espresso": <Coffee className="w-5 h-5" />,
   "Bakery & Pastries": <Cookie className="w-5 h-5" />,
+  "Breads": <Sandwich className="w-5 h-5" />,
+  "Cakes": <Cake className="w-5 h-5" />,
+  "Pastries & Snacks": <Cookie className="w-5 h-5" />,
+  "Breakfast & Light Bites": <Coffee className="w-5 h-5" />,
+  kitchen: <Utensils className="w-5 h-5" />,
+  bakery: <Cookie className="w-5 h-5" />,
+  bar: <Wine className="w-5 h-5" />,
+  coffee: <Coffee className="w-5 h-5" />,
 };
 
 export const ACCOMPANIMENTS_NOTE = "Served with any 2: Plain Rice, Pilau Rice, Spaghetti, Boiled Potatoes, Boiled Bananas, French Fries, Lyonaise Potatoes, Fresh Beans, Mixed Vegetables, or Greens.";
 
-export const MENU_ITEMS: MenuItem[] = [
+export const MENU_ITEMS: Array<Partial<MenuItem>> = [
   // SIGNATURE MEALS
   {
     id: 'sig-1',

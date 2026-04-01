@@ -5,6 +5,7 @@ import { auth } from '../lib/firebase';
 import { User, Phone, Sparkles, History, ShoppingBag, ChevronRight, Save, LogOut, Coffee, Camera, Upload, Heart, Utensils, Trash2 } from 'lucide-react';
 import { UserProfile, HistoricalOrder, CartItem, MenuItem } from '../types';
 import { CATEGORY_ICONS } from '../constants';
+import { getCategoryIconKey, getMenuItemPriceLabel } from '../lib/catalog';
 
 interface ProfileViewProps {
   userProfile: UserProfile;
@@ -205,11 +206,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             {wishlist.map((item) => (
               <div key={item.id} className="bg-white rounded-3xl p-5 border border-[var(--color-border)] shadow-sm flex items-center gap-4 animate-in zoom-in-95 duration-300">
                 <div className="w-14 h-14 bg-[var(--color-border)] rounded-2xl flex items-center justify-center text-[var(--color-text)] shrink-0">
-                  {CATEGORY_ICONS[item.category] || <Utensils className="w-6 h-6" />}
+                  {CATEGORY_ICONS[getCategoryIconKey(item)] || <Utensils className="w-6 h-6" />}
                 </div>
                 <div className="flex-1 min-w-0">
                   <h4 className="font-bold text-[var(--color-text)] text-sm uppercase font-serif truncate">{item.name}</h4>
-                  <p className="text-[10px] text-[var(--color-primary)] font-bold uppercase tracking-widest">{item.price.toLocaleString()} RWF</p>
+                  <p className="text-[10px] text-[var(--color-primary)] font-bold uppercase tracking-widest">{getMenuItemPriceLabel(item)}</p>
                 </div>
                 <div className="flex gap-2">
                   <button 
