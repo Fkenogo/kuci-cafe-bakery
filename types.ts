@@ -302,6 +302,7 @@ export interface AppUserRecord {
   isActive: boolean;
   profileType?: 'staff_profile' | 'linked_account';
   linkedUid?: string;
+  linkedInviteId?: string;
   phone?: string;
   staffCode?: string;
   shiftLabel?: string;
@@ -316,9 +317,47 @@ export interface HistoricalOrder {
   items: CartItem[];
   total: number;
   type: OrderType;
+  receipt?: {
+    receiptNumber: string;
+    paymentMethod: PaymentMethod | null;
+    amountReceived: number;
+    financialStatus: FinancialStatus;
+    generatedAt: string;
+    loyaltyRedeemed?: number;
+  };
 }
 
 export type OrderServiceMode = 'dine_in' | 'pickup' | 'delivery';
+export type PaymentMethod = 'cash' | 'mobile_money' | 'bank_transfer' | 'other';
+export type FinancialStatus = 'unpaid' | 'paid' | 'complimentary' | 'credit';
+export type OrderPaymentStatus = 'pending' | 'paid' | 'complimentary' | 'credit';
+export type OrderEntryMode = 'customer_self' | 'staff_assisted';
+export type OrderSource = 'walk_in' | 'phone_call' | 'whatsapp' | 'other';
+export type CheckoutPaymentChoice = 'cash' | 'mobile_money' | 'whatsapp';
+
+export interface OrderPaymentRecord {
+  method: PaymentMethod | null;
+  amountReceived: number;
+  currency: string;
+  isComplimentary: boolean;
+  isCredit: boolean;
+  recordedBy: StaffIdentity | null;
+  recordedAt: unknown | null;
+}
+
+export interface OrderReceipt {
+  receiptNumber: string;
+  generatedAt: unknown;
+  visibleToCustomer: boolean;
+}
+
+export interface OrderLoyaltyRedemption {
+  selectedByCustomer: boolean;
+  requestedAmount: number;
+  appliedAmount: number;
+  blockSize: number;
+}
+
 export type AccountingTreatment = 'paid' | 'complimentary' | 'credit' | 'cancelled' | 'mixed_review';
 export type AccountingReasonCode =
   | 'owner_use'
@@ -389,11 +428,23 @@ export interface PersistedOrder {
   updatedAt: unknown;
   businessDate?: string; // YYYY-MM-DD
   status: OrderStatus;
-  paymentStatus: 'pending';
+  paymentStatus: OrderPaymentStatus;
+  payment?: OrderPaymentRecord;
+  financialStatus?: FinancialStatus;
+  receipt?: OrderReceipt;
+  loyaltyRedemption?: OrderLoyaltyRedemption;
+  checkoutPaymentChoice?: CheckoutPaymentChoice;
   serviceMode: OrderServiceMode;
+  orderEntryMode?: OrderEntryMode;
+  orderSource?: OrderSource;
   serviceArea: OrderServiceArea;
   frontLane: FrontLane;
   dispatchMode: DispatchMode;
+  createdByStaffUid?: string;
+  createdByStaffRole?: Exclude<UserRole, 'user'>;
+  createdByStaffName?: string;
+  assistedCustomerName?: string;
+  assistedCustomerPhoneNormalized?: string;
   customer: PersistedOrderCustomer;
   items: PersistedOrderItem[];
   subtotal: number;
@@ -481,8 +532,11 @@ export interface BakeryDailyReconciliation {
   updatedAt: unknown;
   openedBy?: StaffIdentity;
   lastUpdatedBy?: StaffIdentity;
+  lastUpdatedAt?: unknown;
   closedBy?: StaffIdentity;
   closedAt?: unknown;
+  reopenedBy?: StaffIdentity;
+  reopenedAt?: unknown;
   notes?: string;
   settlement?: ReconciliationSettlementTotals;
   cashControl?: ReconciliationCashControl;
@@ -542,6 +596,7 @@ export interface ReconciliationSettlementTotals {
   complimentaryValue: number;
   creditValue: number;
   mixedReviewValue: number;
+  loyaltyRedeemedValue?: number;
   collectibleExpectedCash: number;
   cashReceived: number;
   mobileMoneyReceived: number;
@@ -578,7 +633,28 @@ export interface CafeDailyReconciliation {
   updatedAt: unknown;
   openedBy?: StaffIdentity;
   lastUpdatedBy?: StaffIdentity;
+  lastUpdatedAt?: unknown;
   closedBy?: StaffIdentity;
   closedAt?: unknown;
+  reopenedBy?: StaffIdentity;
+  reopenedAt?: unknown;
   cashControl?: ReconciliationCashControl;
+}
+
+export interface CustomerReward {
+  phone: string;
+  totalEarned: number;
+  totalRedeemed: number;
+  balance: number;
+  updatedAt: unknown;
+  lastOrderId?: string;
+}
+
+export interface CustomerRewardTransaction {
+  orderId: string;
+  phone: string;
+  type: 'earn' | 'redeem' | 'adjustment';
+  amount: number;
+  createdAt: unknown;
+  recordedBy?: StaffIdentity | null;
 }

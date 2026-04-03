@@ -89,11 +89,11 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
   }, []);
 
   const baristaChoices = useMemo(() => {
-    const coffeeCat = categories.find(c => c.name === "Coffee & Espresso")?.id;
-    const cocktailCat = categories.find(c => c.name === "Cocktails & Wines" || c.name === "Café Signature Cocktails")?.id;
-    
-    const coffees = menuItems.filter(i => getMenuItemCategoryId(i) === coffeeCat).slice(0, 2);
-    const cocktails = menuItems.filter(i => getMenuItemCategoryId(i) === cocktailCat).slice(0, 2);
+    const coffeeCategory = categories.find((category) => category.id === 'coffee-espresso');
+    const cocktailCategory = categories.find((category) => category.id === 'cocktails-wines');
+
+    const coffees = coffeeCategory ? menuItems.filter((item) => getMenuItemCategoryId(item) === coffeeCategory.id).slice(0, 2) : [];
+    const cocktails = cocktailCategory ? menuItems.filter((item) => getMenuItemCategoryId(item) === cocktailCategory.id).slice(0, 2) : [];
     return [...coffees, ...cocktails];
   }, [menuItems, categories]);
 
@@ -417,7 +417,7 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
                   <button 
                     className="mt-3 w-full bg-[var(--color-primary)]/10 text-[var(--color-primary)] py-2 rounded-xl text-[8px] font-black uppercase tracking-widest flex items-center justify-center gap-1.5"
                   >
-                    <Plus className="w-2.5 h-2.5" /> Reorder
+                    <Plus className="w-2.5 h-2.5" /> Order Again
                   </button>
                 </div>
               </div>
@@ -446,6 +446,7 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
       >
         <MessageCircle className="w-8 h-8" />
       </a>
+
     </div>
   );
 };

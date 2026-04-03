@@ -53,13 +53,17 @@ export const Auth: React.FC<AuthProps> = ({ user, appUser, onOpenSignIn }) => {
     );
   }
 
+  if (!onOpenSignIn) {
+    return null;
+  }
+
   return (
     <button
       onClick={() => onOpenSignIn?.()}
       className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-bold text-[var(--color-primary)] shadow-sm transition-colors hover:bg-[var(--color-primary)]/5"
     >
       <LogIn className="w-4 h-4" />
-      Sign In
+      Staff Access
     </button>
   );
 };

@@ -8,8 +8,10 @@ There is no separate signup screen. First-time users are created automatically o
 
 ## Final Flow
 
-1. User clicks `Sign In`.
-2. `components/Auth.tsx` starts Google popup auth with `signInWithPopup`.
+1. Internal user opens `/admin/login` or invite flow hands off to `/auth`.
+2. `views/CustomerAuthView.tsx` starts Google auth:
+   - mobile/small viewport: `signInWithRedirect`
+   - desktop: `signInWithPopup`
 3. `App.tsx` receives the authenticated user through `onAuthStateChanged`.
 4. `lib/authBootstrap.ts` runs `ensureAppUserRecord(user)`.
 5. If `users/{uid}` does not exist, it creates:
@@ -23,6 +25,13 @@ There is no separate signup screen. First-time users are created automatically o
    - `updatedAt`
 6. If the doc already exists, it preserves the existing role and refreshes profile fields and `updatedAt`.
 7. The app continues normally and the auth session persists through Firebase Auth's default web persistence.
+
+## OAuth Redirect Domain
+
+- KUCI serves from `https://kuci-cafe-bakery.web.app`
+- Firebase `authDomain` is expected to resolve to `kuci-cafe-bakery.web.app`
+- Required Google OAuth redirect handler URI:
+  - `https://kuci-cafe-bakery.web.app/__/auth/handler`
 
 ## Initial Super Admin Bootstrap
 

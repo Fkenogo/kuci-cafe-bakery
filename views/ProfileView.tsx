@@ -89,7 +89,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
              <div className="h-full bg-[var(--color-primary)]" style={{ width: `${Math.min(100, (loyaltyPoints / 500) * 100)}%` }} />
           </div>
           <p className="text-[10px] opacity-50 uppercase tracking-widest font-black">
-            1 Point = 1 RWF Discount
+            Saved rewards for future redemption
           </p>
         </div>
         <div className="absolute top-0 right-0 p-8 opacity-5">
@@ -281,7 +281,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   onClick={() => onReorder(order.items)}
                   className="w-full border-2 border-[var(--color-text)] text-[var(--color-text)] py-4 rounded-2xl font-black uppercase tracking-widest text-[9px] flex items-center justify-center gap-2 group-hover:bg-[var(--color-text)] group-hover:text-white transition-all shadow-sm"
                 >
-                  <ShoppingBag className="w-4 h-4" /> Repeat Order
+                  <ShoppingBag className="w-4 h-4" /> Order Again
                 </button>
               </div>
             ))}

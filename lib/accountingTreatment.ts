@@ -1,7 +1,9 @@
 import {
   AccountingReasonCode,
   AccountingTreatment,
+  FinancialStatus,
   OrderServiceArea,
+  PaymentMethod,
   PersistedOrder,
   ReconciliationSettlementTotals,
 } from '../types';
@@ -18,6 +20,7 @@ export interface ReconciliationAuditRow {
   serviceMode: PersistedOrder['serviceMode'];
   status: PersistedOrder['status'];
   total: number;
+  loyaltyRedeemed: number;
   treatment: AccountingTreatment;
   reasonCode: AccountingReasonCode | null;
   reasonNote: string;
@@ -25,6 +28,8 @@ export interface ReconciliationAuditRow {
   includedInCollectibleCash: boolean;
   includedLabel: 'yes' | 'no';
   exclusionReason: string | null;
+  orderEntryMode: 'customer_self' | 'staff_assisted';
+  createdByStaffName: string;
 }
 
 export interface ReconciliationOrderSummary {
@@ -42,6 +47,7 @@ export interface ReconciliationOrderSummary {
   complimentaryValue: number;
   creditValue: number;
   mixedReviewValue: number;
+  loyaltyRedeemedValue: number;
   collectibleExpectedCash: number;
   excludedOtherAreaOrders: number;
   excludedMixedOrders: number;
@@ -56,7 +62,28 @@ export interface PaymentDraftInput {
   otherReceived: number;
 }
 
+export interface CapturedPaymentSummary extends PaymentDraftInput {
+  complimentaryOrders: number;
+  creditOrders: number;
+}
+
+function normalizeFinancialStatus(order: PersistedOrder): FinancialStatus {
+  if (order.financialStatus === 'unpaid' || order.financialStatus === 'paid' || order.financialStatus === 'complimentary' || order.financialStatus === 'credit') {
+    return order.financialStatus;
+  }
+  if (order.accountingTreatment === 'complimentary') return 'complimentary';
+  if (order.accountingTreatment === 'credit') return 'credit';
+  if (order.paymentStatus === 'paid') return 'paid';
+  if (order.paymentStatus === 'complimentary') return 'complimentary';
+  if (order.paymentStatus === 'credit') return 'credit';
+  return 'unpaid';
+}
+
 export function normalizeAccountingTreatment(order: PersistedOrder): AccountingTreatment {
+  const financialStatus = normalizeFinancialStatus(order);
+  if (financialStatus === 'complimentary') return 'complimentary';
+  if (financialStatus === 'credit') return 'credit';
+  if (financialStatus === 'paid') return 'paid';
   if (order.accountingTreatment) return order.accountingTreatment;
   if (order.status === 'rejected') return 'cancelled';
   if (order.serviceArea === 'mixed') return 'mixed_review';
@@ -93,6 +120,11 @@ export function buildReconciliationAuditRows(
       if (!orderDate) return [];
 
       const total = Number.isFinite(order.total) ? order.total : 0;
+      const loyaltyRedeemed =
+        order.loyaltyRedemption?.selectedByCustomer === true &&
+        Number.isFinite(order.loyaltyRedemption.appliedAmount)
+          ? Math.max(0, order.loyaltyRedemption.appliedAmount)
+          : 0;
       const treatment = normalizeAccountingTreatment(order);
       const reasonCode = normalizeReasonCode(order);
       const reasonNote = typeof order.accountingReasonNote === 'string' ? order.accountingReasonNote : '';
@@ -105,6 +137,7 @@ export function buildReconciliationAuditRows(
         serviceMode: order.serviceMode,
         status: order.status,
         total,
+        loyaltyRedeemed,
         treatment,
         reasonCode,
         reasonNote,
@@ -112,6 +145,8 @@ export function buildReconciliationAuditRows(
         includedInCollectibleCash: false,
         includedLabel: 'no',
         exclusionReason: null,
+        orderEntryMode: order.orderEntryMode === 'staff_assisted' ? 'staff_assisted' : 'customer_self',
+        createdByStaffName: order.orderEntryMode === 'staff_assisted' ? (order.createdByStaffName || '') : '',
       };
 
       if (!inOwnedArea) {
@@ -195,6 +230,7 @@ export function summarizeAuditRows(
     } else if (row.treatment === 'mixed_review') {
       acc.mixedReviewValue += row.total;
     }
+    acc.loyaltyRedeemedValue += row.loyaltyRedeemed;
 
     return acc;
   }, {
@@ -212,6 +248,7 @@ export function summarizeAuditRows(
     complimentaryValue: 0,
     creditValue: 0,
     mixedReviewValue: 0,
+    loyaltyRedeemedValue: 0,
     collectibleExpectedCash: 0,
     excludedOtherAreaOrders: 0,
     excludedMixedOrders: 0,
@@ -227,7 +264,8 @@ export function computeSettlementTotals(
   const collectibleExpectedCash =
     summary.grossCompletedSales -
     summary.complimentaryValue -
-    summary.creditValue;
+    summary.creditValue -
+    summary.loyaltyRedeemedValue;
   const totalReceived =
     payments.cashReceived +
     payments.mobileMoneyReceived +
@@ -239,6 +277,7 @@ export function computeSettlementTotals(
     complimentaryValue: summary.complimentaryValue,
     creditValue: summary.creditValue,
     mixedReviewValue: summary.mixedReviewValue,
+    loyaltyRedeemedValue: summary.loyaltyRedeemedValue,
     collectibleExpectedCash,
     cashReceived: payments.cashReceived,
     mobileMoneyReceived: payments.mobileMoneyReceived,
@@ -247,4 +286,68 @@ export function computeSettlementTotals(
     totalReceived,
     variance: totalReceived - collectibleExpectedCash,
   };
+}
+
+function modeAllowsOrderForPayment(mode: ReconciliationMode, order: PersistedOrder): boolean {
+  if (!modeOwnsServiceArea(mode, order.serviceArea)) return false;
+  if (order.status !== 'completed') return false;
+  return true;
+}
+
+function amountByMethod(method: PaymentMethod | null | undefined, amountReceived: number): PaymentDraftInput {
+  const safeAmount = Number.isFinite(amountReceived) ? Math.max(0, amountReceived) : 0;
+  if (safeAmount <= 0) {
+    return { cashReceived: 0, mobileMoneyReceived: 0, bankReceived: 0, otherReceived: 0 };
+  }
+  if (method === 'cash') {
+    return { cashReceived: safeAmount, mobileMoneyReceived: 0, bankReceived: 0, otherReceived: 0 };
+  }
+  if (method === 'mobile_money') {
+    return { cashReceived: 0, mobileMoneyReceived: safeAmount, bankReceived: 0, otherReceived: 0 };
+  }
+  if (method === 'bank_transfer') {
+    return { cashReceived: 0, mobileMoneyReceived: 0, bankReceived: safeAmount, otherReceived: 0 };
+  }
+  if (method === 'other') {
+    return { cashReceived: 0, mobileMoneyReceived: 0, bankReceived: 0, otherReceived: safeAmount };
+  }
+  return { cashReceived: 0, mobileMoneyReceived: 0, bankReceived: 0, otherReceived: 0 };
+}
+
+export function aggregateCapturedPayments(
+  orders: PersistedOrder[],
+  businessDate: string,
+  mode: ReconciliationMode
+): CapturedPaymentSummary {
+  return orders.reduce<CapturedPaymentSummary>((acc, order) => {
+    const orderDate = inBusinessDate(order, businessDate);
+    if (!orderDate) return acc;
+    if (!modeAllowsOrderForPayment(mode, order)) return acc;
+    if (order.serviceArea === 'mixed') return acc;
+
+    const financialStatus = normalizeFinancialStatus(order);
+    if (financialStatus === 'complimentary') {
+      acc.complimentaryOrders += 1;
+    }
+    if (financialStatus === 'credit') {
+      acc.creditOrders += 1;
+    }
+
+    const payment = order.payment;
+    if (!payment) return acc;
+
+    const byMethod = amountByMethod(payment.method, payment.amountReceived);
+    acc.cashReceived += byMethod.cashReceived;
+    acc.mobileMoneyReceived += byMethod.mobileMoneyReceived;
+    acc.bankReceived += byMethod.bankReceived;
+    acc.otherReceived += byMethod.otherReceived;
+    return acc;
+  }, {
+    cashReceived: 0,
+    mobileMoneyReceived: 0,
+    bankReceived: 0,
+    otherReceived: 0,
+    complimentaryOrders: 0,
+    creditOrders: 0,
+  });
 }

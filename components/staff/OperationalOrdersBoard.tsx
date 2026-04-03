@@ -1,12 +1,20 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, doc, onSnapshot, orderBy, query, serverTimestamp, updateDoc } from 'firebase/firestore';
-import { AlertCircle, ChevronDown, ChevronUp, Clock3, Loader2, Phone, Search, ShoppingBag, UserRound } from 'lucide-react';
+import { collection, doc, onSnapshot, orderBy, query, updateDoc } from 'firebase/firestore';
+import { AlertCircle, ChevronDown, ChevronUp, Loader2, Phone, Search, ShoppingBag, UserRound } from 'lucide-react';
 import { db } from '../../lib/firebase';
 import { toBusinessDate } from '../../lib/businessDate';
 import { isOrderOperationallyTerminal, resolveOrderBusinessDate } from '../../lib/orderDayLifecycle';
 import {
+  buildCompletionPaymentUpdate,
+  buildOptimisticCompletionWithPayment,
+  createInitialPaymentCaptureDraft,
+  PaymentCaptureDraft,
+  resolveOrderAmountDue,
+  validatePaymentCapture,
+} from '../../lib/orderPayments';
+import { accrueCustomerRewardForCompletedPaidOrder } from '../../lib/customerRewards';
+import {
   buildFrontServiceAcceptUpdate,
-  buildOptimisticCompletionState,
   buildOptimisticFrontServiceAcceptState,
   buildOptimisticStationProgressState,
   buildStationProgressUpdate,
@@ -155,6 +163,7 @@ export const OperationalOrdersBoard: React.FC<OperationalOrdersBoardProps> = ({ 
   const [orders, setOrders] = useState<LiveOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [expandedOrderIds, setExpandedOrderIds] = useState<Record<string, boolean>>({});
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>(() => {
     if (typeof window === 'undefined') return {};
@@ -176,13 +185,33 @@ export const OperationalOrdersBoard: React.FC<OperationalOrdersBoardProps> = ({ 
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
   const [rejectingKey, setRejectingKey] = useState<string | null>(null);
   const [rejectionDrafts, setRejectionDrafts] = useState<Record<string, string>>({});
+  const [showFilters, setShowFilters] = useState(false);
+  const [paymentModalOrder, setPaymentModalOrder] = useState<LiveOrder | null>(null);
+  const [paymentDraft, setPaymentDraft] = useState<PaymentCaptureDraft>({
+    method: '',
+    amountReceived: '',
+    isComplimentary: false,
+    isCredit: false,
+  });
   const actingStaff = useMemo(() => toStaffIdentity(currentStaff), [currentStaff]);
   const activeBusinessDate = toBusinessDate();
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setNowMs(Date.now()), 30000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     window.sessionStorage.setItem(getSectionStorageKey(scope), JSON.stringify(collapsedSections));
   }, [collapsedSections, scope]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timeout = window.setTimeout(() => setNotice(null), 2500);
+    return () => window.clearTimeout(timeout);
+  }, [notice]);
 
   useEffect(() => {
     if (!isAllowed) {
@@ -303,6 +332,65 @@ export const OperationalOrdersBoard: React.FC<OperationalOrdersBoardProps> = ({ 
     setOrders((prev) => prev.map((order) => (order.id === orderId ? { ...order, ...patch } : order)));
   };
 
+  const getElapsedMeta = (createdAt?: Date | null): { label: string; tone: 'green' | 'amber' | 'red' } => {
+    if (!createdAt) return { label: '0m', tone: 'green' };
+    const elapsedMs = Math.max(0, nowMs - createdAt.getTime());
+    const totalMins = Math.floor(elapsedMs / 60000);
+    const hours = Math.floor(totalMins / 60);
+    const mins = totalMins % 60;
+    const label = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+    if (totalMins > 10) return { label, tone: 'red' };
+    if (totalMins >= 5) return { label, tone: 'amber' };
+    return { label, tone: 'green' };
+  };
+
+  const getUrgencyClasses = (tone: 'green' | 'amber' | 'red'): string => {
+    if (tone === 'red') return 'bg-red-600 text-white';
+    if (tone === 'amber') return 'bg-amber-500 text-white';
+    return 'bg-emerald-600 text-white';
+  };
+
+  const getOrderActionHint = (order: LiveOrder, orderStations: PrepStation[]): string => {
+    if (order.status === 'pending') return 'Waiting for front acceptance';
+    if (order.status === 'front_accepted') {
+      if (orderStations.includes('kitchen')) return 'Waiting for kitchen';
+      if (orderStations.includes('barista')) return 'Waiting for barista';
+      return 'Ready for handover';
+    }
+    if (order.status === 'in_progress') {
+      if (orderStations.includes('kitchen') && orderStations.includes('barista')) return 'Kitchen and barista in progress';
+      if (orderStations.includes('kitchen')) return 'Kitchen in progress';
+      if (orderStations.includes('barista')) return 'Barista in progress';
+      return 'In progress';
+    }
+    if (order.status === 'ready_for_handover') return 'Ready for handover';
+    if (order.status === 'completed') return 'Order completed';
+    if (order.status === 'rejected') return 'Needs follow-up';
+    return 'Waiting for update';
+  };
+
+  function formatTimeOnly(value?: Date | null): string {
+    if (!value) return '';
+    return new Intl.DateTimeFormat('en-RW', { timeStyle: 'short' }).format(value);
+  }
+
+  function getStationActionHint(status: StationOrderStatus | null | undefined): string {
+    if (!status) return 'Waiting for dispatch';
+    if (status === 'queued') return 'Waiting to accept';
+    if (status === 'accepted') return 'Ready to start prep';
+    if (status === 'preparing') return 'In preparation';
+    if (status === 'ready') return 'Ready for handover';
+    if (status === 'rejected') return 'Needs follow-up';
+    return 'Waiting for update';
+  }
+
+  function getEmptyStateContent(): { title: string; description: string } {
+    if (scope === 'barista') return { title: 'No drink orders waiting', description: 'New drink tasks appear here automatically when front service accepts an order.' };
+    if (scope === 'kitchen') return { title: 'No food prep tasks', description: 'Kitchen tasks appear here when front service accepts an order.' };
+    if (scope === 'bakery_front_service') return { title: 'No bakery orders', description: 'New bakery orders will appear here as they come in.' };
+    return { title: 'No pending orders', description: 'New customer orders will appear here as they come in.' };
+  }
+
   const openRejectReason = (orderId: string, station: PrepStation) => {
     const key = getRejectingKey(orderId, station);
     setRejectingKey(key);
@@ -328,8 +416,10 @@ export const OperationalOrdersBoard: React.FC<OperationalOrdersBoardProps> = ({ 
     try {
       setUpdatingOrderId(order.id);
       setError(null);
+      setNotice(null);
       patchOrderLocally(order.id, optimisticPatch);
       await updateDoc(doc(db, 'orders', order.id), buildFrontServiceAcceptUpdate(order, menuItems, actingStaff));
+      setNotice('Accepted order.');
     } catch (updateError) {
       console.error('[front_service] Failed to accept order:', updateError);
       setError('Could not accept this order.');
@@ -339,20 +429,48 @@ export const OperationalOrdersBoard: React.FC<OperationalOrdersBoardProps> = ({ 
   };
 
   const handleFrontServiceComplete = async (order: LiveOrder) => {
+    setError(null);
+    setNotice(null);
+    setPaymentModalOrder(order);
+    setPaymentDraft(createInitialPaymentCaptureDraft(order));
+  };
+
+  const closePaymentModal = () => {
+    if (updatingOrderId) return;
+    setPaymentModalOrder(null);
+  };
+
+  const handleConfirmPaymentAndComplete = async () => {
+    if (!paymentModalOrder || updatingOrderId) return;
+    const validation = validatePaymentCapture(paymentModalOrder.total, paymentDraft, resolveOrderAmountDue(paymentModalOrder));
+    if (validation.ok === false) {
+      setError(validation.message);
+      return;
+    }
+
+    const order = paymentModalOrder;
     if (updatingOrderId) return;
 
     try {
       setUpdatingOrderId(order.id);
       setError(null);
-      patchOrderLocally(order.id, buildOptimisticCompletionState(actingStaff));
-      await updateDoc(doc(db, 'orders', order.id), {
-        status: 'completed',
-        completedBy: actingStaff,
-        updatedAt: serverTimestamp(),
-      });
+      setNotice(null);
+      patchOrderLocally(order.id, buildOptimisticCompletionWithPayment(actingStaff, validation));
+      await updateDoc(doc(db, 'orders', order.id), buildCompletionPaymentUpdate(order, actingStaff, validation));
+      if (validation.financialStatus === 'paid' && order.orderEntryMode !== 'staff_assisted') {
+        await accrueCustomerRewardForCompletedPaidOrder({
+          orderId: order.id,
+          customerPhone: order.customer.phone,
+          orderTotal: order.total,
+          loyaltyRedeemedAmount: order.loyaltyRedemption?.selectedByCustomer ? order.loyaltyRedemption.appliedAmount : 0,
+          recordedBy: actingStaff,
+        });
+      }
+      setNotice('Payment captured and order completed.');
+      setPaymentModalOrder(null);
     } catch (updateError) {
       console.error('[front_service] Failed to complete order:', updateError);
-      setError('Could not complete this order.');
+      setError('Could not complete this order after payment capture.');
     } finally {
       setUpdatingOrderId(null);
     }
@@ -374,8 +492,13 @@ export const OperationalOrdersBoard: React.FC<OperationalOrdersBoardProps> = ({ 
     try {
       setUpdatingOrderId(order.id);
       setError(null);
+      setNotice(null);
       patchOrderLocally(order.id, optimisticPatch);
       await updateDoc(doc(db, 'orders', order.id), buildStationProgressUpdate(order, station, action, menuItems, actingStaff, rejectionReason));
+      if (action === 'accept') setNotice('Accepted task.');
+      if (action === 'preparing') setNotice('Marked in progress.');
+      if (action === 'ready') setNotice('Marked ready.');
+      if (action === 'reject') setNotice('Rejected task.');
 
       if (action === 'reject') {
         setRejectingKey((current) => (current === rejectionKey ? null : current));
@@ -391,7 +514,7 @@ export const OperationalOrdersBoard: React.FC<OperationalOrdersBoardProps> = ({ 
 
   const statusOptions = isFrontScope(scope)
     ? [
-        { value: 'all', label: 'All sections' },
+        { value: 'all', label: 'All statuses' },
         { value: 'pending', label: 'Pending' },
         { value: 'front_accepted', label: 'Front accepted' },
         { value: 'in_progress', label: 'In progress' },
@@ -400,7 +523,7 @@ export const OperationalOrdersBoard: React.FC<OperationalOrdersBoardProps> = ({ 
         { value: 'completed', label: 'Completed' },
       ]
     : [
-        { value: 'all', label: 'All sections' },
+        { value: 'all', label: 'All statuses' },
         { value: 'queued', label: 'Queued' },
         { value: 'accepted', label: 'Accepted' },
         { value: 'preparing', label: 'Preparing' },
@@ -420,35 +543,160 @@ export const OperationalOrdersBoard: React.FC<OperationalOrdersBoardProps> = ({ 
     );
   }
 
-  return (
-    <div className="px-4 py-8 space-y-6 pb-28">
-      <header className="space-y-2">
-        <div className="flex items-center justify-between">
-          <h2 className="text-3xl font-serif">{title}</h2>
-          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--color-primary)]">
-            {filteredOrders.length} {filteredOrders.length === 1 ? 'order' : 'orders'}
-          </span>
-        </div>
-        <p className="text-sm text-[var(--color-text-muted)]">{subtitle}</p>
-      </header>
+  const getSectionColor = (key: string) => {
+    if (key === 'pending') return 'border-amber-300 bg-amber-50 text-amber-900';
+    if (key === 'front_accepted') return 'border-blue-200 bg-blue-50 text-blue-900';
+    if (key === 'in_progress') return 'border-sky-300 bg-sky-50 text-sky-900';
+    if (key === 'ready_for_handover' || key === 'ready') return 'border-emerald-300 bg-emerald-50 text-emerald-900';
+    if (key === 'rejected') return 'border-red-300 bg-red-50 text-red-900';
+    if (key === 'queued') return 'border-amber-200 bg-amber-50 text-amber-800';
+    if (key === 'accepted') return 'border-blue-200 bg-blue-50 text-blue-900';
+    if (key === 'preparing') return 'border-sky-300 bg-sky-50 text-sky-900';
+    if (key === 'completed') return 'border-gray-200 bg-gray-50 text-gray-700';
+    return 'border-[var(--color-border)] bg-white';
+  };
 
-      <section className="rounded-[28px] border border-[var(--color-border)] bg-white px-4 py-4 space-y-4">
-        <div className="flex flex-wrap items-center gap-3">
+  const getSectionDot = (key: string) => {
+    if (key === 'pending' || key === 'queued') return 'bg-amber-400';
+    if (key === 'front_accepted' || key === 'accepted') return 'bg-blue-400';
+    if (key === 'in_progress' || key === 'preparing') return 'bg-sky-500';
+    if (key === 'ready_for_handover' || key === 'ready') return 'bg-emerald-500';
+    if (key === 'rejected') return 'bg-red-500';
+    if (key === 'completed') return 'bg-gray-400';
+    return 'bg-[var(--color-primary)]';
+  };
+
+  return (
+    <div className="px-4 py-5 space-y-4 pb-28">
+      {paymentModalOrder && (
+        <div className="fixed inset-0 z-[130] bg-black/40 flex items-center justify-center px-4">
+          <div className="w-full max-w-lg rounded-[24px] border border-[var(--color-border)] bg-white shadow-2xl p-5 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-xl font-serif">Capture Payment</h3>
+                <p className="text-xs text-[var(--color-text-muted)]">
+                  Order #{paymentModalOrder.id.slice(-6)} • Total {formatCurrency(paymentModalOrder.total)} • Amount Due {formatCurrency(resolveOrderAmountDue(paymentModalOrder))}
+                </p>
+              </div>
+              <button
+                onClick={closePaymentModal}
+                disabled={!!updatingOrderId}
+                className="rounded-full border border-[var(--color-border)] px-3 py-1 text-xs font-black uppercase tracking-wider disabled:opacity-50"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="space-y-1 block">
+                <span className="text-xs font-semibold text-[var(--color-text-muted)]">Payment Method</span>
+                <select
+                  value={paymentDraft.method}
+                  onChange={(event) => setPaymentDraft((prev) => ({ ...prev, method: event.target.value as PaymentCaptureDraft['method'] }))}
+                  disabled={paymentDraft.isComplimentary || !!updatingOrderId}
+                  className="w-full rounded-[14px] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm disabled:opacity-60"
+                >
+                  <option value="">Select method</option>
+                  <option value="cash">Cash</option>
+                  <option value="mobile_money">Mobile money</option>
+                  <option value="bank_transfer">Bank transfer</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+
+              <label className="space-y-1 block">
+                <span className="text-xs font-semibold text-[var(--color-text-muted)]">Amount Received (RWF)</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={paymentDraft.amountReceived}
+                  onChange={(event) => setPaymentDraft((prev) => ({ ...prev, amountReceived: event.target.value }))}
+                  disabled={paymentDraft.isComplimentary || !!updatingOrderId}
+                  className="w-full rounded-[14px] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm disabled:opacity-60"
+                />
+              </label>
+            </div>
+
+            <div className="grid gap-2">
+              <label className="inline-flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={paymentDraft.isComplimentary}
+                  disabled={!!updatingOrderId}
+                  onChange={(event) =>
+                    setPaymentDraft((prev) => ({
+                      ...prev,
+                      isComplimentary: event.target.checked,
+                      isCredit: event.target.checked ? false : prev.isCredit,
+                      method: event.target.checked ? '' : prev.method,
+                      amountReceived: event.target.checked ? '0' : prev.amountReceived,
+                    }))
+                  }
+                />
+                Complimentary (no payment expected)
+              </label>
+              <label className="inline-flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={paymentDraft.isCredit}
+                  disabled={paymentDraft.isComplimentary || !!updatingOrderId}
+                  onChange={(event) => setPaymentDraft((prev) => ({ ...prev, isCredit: event.target.checked }))}
+                />
+                Credit (payment deferred)
+              </label>
+            </div>
+
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={closePaymentModal}
+                disabled={!!updatingOrderId}
+                className="inline-flex items-center rounded-full border border-[var(--color-border)] px-4 py-2 text-xs font-black uppercase tracking-wider disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmPaymentAndComplete}
+                disabled={!!updatingOrderId}
+                className="inline-flex items-center rounded-full border border-[var(--color-primary)] bg-[var(--color-primary)] text-white px-4 py-2 text-xs font-black uppercase tracking-wider disabled:opacity-50"
+              >
+                {updatingOrderId === paymentModalOrder.id ? 'Completing…' : 'Capture & Complete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      <header className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-serif">{title}</h2>
+          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{subtitle}</p>
+        </div>
+        <div className="flex items-center gap-2">
           <button
             onClick={() => setFilters((prev) => ({ ...prev, activeOnly: !prev.activeOnly }))}
-            className={`px-4 py-2 rounded-full text-[11px] font-black uppercase tracking-widest border ${
+            className={`px-3 py-2 rounded-full text-[10px] font-black uppercase tracking-widest border transition-colors ${
               filters.activeOnly
                 ? 'bg-[var(--color-primary)] text-white border-[var(--color-primary)]'
                 : 'bg-white text-[var(--color-text)] border-[var(--color-border)]'
             }`}
           >
-            {filters.activeOnly ? 'Active Only' : 'All Orders'}
+            {filters.activeOnly ? 'Active' : 'All'}
           </button>
-          <p className="text-xs text-[var(--color-text-muted)]">
-            Future-ready hook: this filter state reserves `assigneeId` for later accepted-by filtering.
-          </p>
+          <button
+            onClick={() => setShowFilters(prev => !prev)}
+            className={`px-3 py-2 rounded-full text-[10px] font-black uppercase tracking-widest border transition-colors ${
+              showFilters ? 'bg-[var(--color-primary)]/10 border-[var(--color-primary)]/30 text-[var(--color-primary)]' : 'bg-white border-[var(--color-border)]'
+            }`}
+          >
+            <Search className="w-3 h-3" />
+          </button>
+          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--color-primary)]">
+            {filteredOrders.length}
+          </span>
         </div>
+      </header>
 
+      {showFilters && (
+      <section className="rounded-[20px] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-3 space-y-3">
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
           <label className="space-y-1">
             <span className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">Section</span>
@@ -536,11 +784,17 @@ export const OperationalOrdersBoard: React.FC<OperationalOrdersBoardProps> = ({ 
           </label>
         </div>
       </section>
+      )}
 
       {error && (
-        <div className="rounded-[28px] border border-red-200 bg-red-50 px-5 py-4 text-[11px] text-red-700 flex items-start gap-3">
+        <div className="rounded-[20px] border border-red-200 bg-red-50 px-4 py-3 text-[11px] text-red-700 flex items-start gap-3">
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
           <span>{error}</span>
+        </div>
+      )}
+      {notice && (
+        <div className="rounded-[20px] border border-green-200 bg-green-50 px-4 py-3 text-[11px] text-green-700">
+          {notice}
         </div>
       )}
 
@@ -550,34 +804,37 @@ export const OperationalOrdersBoard: React.FC<OperationalOrdersBoardProps> = ({ 
           <p className="text-sm">Loading live orders...</p>
         </div>
       ) : sections.length === 0 ? (
-        <div className="bg-[var(--color-bg)] border-2 border-dashed border-[var(--color-border)] rounded-[40px] p-10 text-center space-y-3">
-          <ShoppingBag className="w-8 h-8 mx-auto text-[var(--color-primary)]" />
-          <h3 className="text-xl font-serif">No queue items</h3>
-          <p className="text-sm text-[var(--color-text-muted)]">No orders match the current filters.</p>
-        </div>
+        (() => {
+          const { title: emptyTitle, description: emptyDesc } = getEmptyStateContent();
+          return (
+            <div className="bg-[var(--color-bg)] border-2 border-dashed border-[var(--color-border)] rounded-[40px] p-10 text-center space-y-3">
+              <ShoppingBag className="w-8 h-8 mx-auto text-[var(--color-primary)]" />
+              <h3 className="text-xl font-serif">{emptyTitle}</h3>
+              <p className="text-sm text-[var(--color-text-muted)]">{emptyDesc}</p>
+            </div>
+          );
+        })()
       ) : (
         <div className="space-y-8">
           {sections.map((section) => {
             const isCollapsed = section.key in collapsedSections ? collapsedSections[section.key] : getDefaultSectionCollapsed(section.key);
 
             return (
-              <section key={section.key} className="space-y-4">
+              <section key={section.key} className="space-y-3">
                 <button
                   onClick={() => toggleSection(section.key)}
-                  className="w-full rounded-[24px] border border-[var(--color-border)] bg-white px-4 py-4 text-left"
+                  className={`w-full rounded-[20px] border px-4 py-3 text-left transition-colors ${getSectionColor(section.key)}`}
                 >
                   <div className="flex items-center justify-between gap-4">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-3">
-                        <h3 className="text-lg font-serif">{section.title}</h3>
-                        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--color-primary)]">
-                          {section.orders.length} {section.orders.length === 1 ? 'order' : 'orders'}
-                        </span>
-                      </div>
-                      <p className="text-xs text-[var(--color-text-muted)]">{section.description}</p>
+                    <div className="flex items-center gap-3">
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${getSectionDot(section.key)}`} />
+                      <h3 className="text-base font-black uppercase tracking-wider">{section.title}</h3>
+                      <span className="text-[10px] font-black uppercase tracking-widest opacity-70">
+                        {section.orders.length}
+                      </span>
                     </div>
-                    <div className="text-[var(--color-text-muted)]">
-                      {isCollapsed ? <ChevronDown className="w-5 h-5" /> : <ChevronUp className="w-5 h-5" />}
+                    <div className="opacity-60">
+                      {isCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
                     </div>
                   </div>
                 </button>
@@ -586,6 +843,7 @@ export const OperationalOrdersBoard: React.FC<OperationalOrdersBoardProps> = ({ 
                   <div className="space-y-4">
                     {section.orders.map((order) => {
                       const involvedStations = deriveInvolvedStations(order, menuItems);
+                      const elapsed = getElapsedMeta(order.createdAt);
                       const relevantTasks = isFrontScope(scope) ? [] : getRelevantOrderTasks(order, scope, menuItems);
                       const isExpanded = !!expandedOrderIds[order.id];
                       const currentStationRecord = isFrontScope(scope) ? null : getStationRecord(order, scope);
@@ -602,11 +860,11 @@ export const OperationalOrdersBoard: React.FC<OperationalOrdersBoardProps> = ({ 
                       const rejectionDraft = rejectionKey ? rejectionDrafts[rejectionKey] || '' : '';
                       const primaryStationAction =
                         currentStationRecord?.status === 'queued'
-                          ? { label: 'Accept', action: 'accept' as const }
+                          ? { label: 'Accept Task', action: 'accept' as const }
                           : currentStationRecord?.status === 'accepted'
-                            ? { label: 'Preparing', action: 'preparing' as const }
+                            ? { label: 'Start Preparing', action: 'preparing' as const }
                             : currentStationRecord?.status === 'preparing'
-                              ? { label: 'Ready', action: 'ready' as const }
+                              ? { label: 'Mark Ready', action: 'ready' as const }
                               : null;
                       const canRejectStationWork =
                         currentStationRecord?.status === 'queued' ||
@@ -619,55 +877,105 @@ export const OperationalOrdersBoard: React.FC<OperationalOrdersBoardProps> = ({ 
                           : 'Prep stations have not been dispatched yet. Station cards appear only after front service accepts the order.';
 
                       return (
-                        <article key={order.id} className="bg-white rounded-[32px] border border-[var(--color-border)] shadow-sm overflow-hidden">
-                          <button onClick={() => toggleExpanded(order.id)} className="w-full text-left p-6 space-y-4">
-                            <div className="flex items-start justify-between gap-4">
-                              <div className="space-y-2 min-w-0">
-                                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--color-text-muted)] break-all">Order #{order.id}</p>
-                                <p className="text-sm font-medium text-[var(--color-text-muted)] flex items-center gap-2">
-                                  <Clock3 className="w-4 h-4 text-[var(--color-primary)]" />
-                                  {formatDate(order.createdAt)}
-                                </p>
-                              </div>
-                              <div className="flex items-center gap-3">
-                                <span className="px-3 py-1 rounded-full bg-[var(--color-primary)]/10 text-[var(--color-primary)] text-[10px] font-black uppercase tracking-widest">
-                                  {isFrontScope(scope) ? formatOrderStatus(order.status) : (currentStationRecord ? formatStationStatus(currentStationRecord.status) : 'Awaiting dispatch')}
-                                </span>
-                                {isExpanded ? <ChevronUp className="w-5 h-5 text-[var(--color-text-muted)]" /> : <ChevronDown className="w-5 h-5 text-[var(--color-text-muted)]" />}
-                              </div>
+                        <article key={order.id} className="bg-white rounded-[24px] border border-[var(--color-border)] shadow-sm overflow-hidden p-4 space-y-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span className={`shrink-0 px-4 py-2 rounded-xl text-lg font-black leading-none ${getUrgencyClasses(elapsed.tone)}`}>
+                                {elapsed.label}
+                              </span>
+                              <span className="text-sm font-semibold text-[var(--color-text)] truncate">
+                                {isFrontScope(scope)
+                                  ? getOrderActionHint(order, involvedStations)
+                                  : getStationActionHint(currentStationRecord?.status)}
+                              </span>
                             </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className="px-2.5 py-1 rounded-full bg-[var(--color-primary)]/10 text-[var(--color-primary)] text-[10px] font-black uppercase tracking-widest">
+                                {isFrontScope(scope)
+                                  ? formatOrderStatus(order.status)
+                                  : (currentStationRecord ? formatStationStatus(currentStationRecord.status) : 'Awaiting dispatch')}
+                              </span>
+                              <button
+                                onClick={() => toggleExpanded(order.id)}
+                                className="text-[var(--color-text-muted)]"
+                                aria-label={isExpanded ? 'Collapse details' : 'Expand details'}
+                              >
+                                {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                              </button>
+                            </div>
+                          </div>
 
-                            {isFrontScope(scope) ? (
-                              <div className="grid grid-cols-2 gap-4 text-sm">
-                                <div className="space-y-1 min-w-0">
-                                  <p className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">Customer</p>
-                                  <p className="font-semibold flex items-center gap-2 truncate">
-                                    <UserRound className="w-4 h-4 text-[var(--color-primary)] shrink-0" />
-                                    <span className="truncate">{order.customer.name}</span>
-                                  </p>
-                                  <p className="text-[var(--color-text-muted)] flex items-center gap-2 truncate">
-                                    <Phone className="w-4 h-4 text-[var(--color-primary)] shrink-0" />
-                                    <span className="truncate">{order.customer.phone}</span>
-                                  </p>
-                                </div>
-                                <div className="space-y-1 text-right">
-                                  <p className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">Service</p>
-                                  <p className="font-semibold capitalize">{formatServiceMode(order.serviceMode)}</p>
-                                  <p className="text-xl font-serif text-[var(--color-primary)]">{formatCurrency(order.total)}</p>
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="space-y-1">
-                                <p className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">
-                                  {relevantTasks.length} {relevantTasks.length === 1 ? 'task' : 'tasks'} for {getPrepStationLabel(scope)}
+                          {!isExpanded && isFrontScope(scope) && order.status === 'pending' && (
+                            <button
+                              onClick={() => handleFrontServiceAccept(order)}
+                              disabled={updatingOrderId === order.id}
+                              className="w-full px-4 py-3.5 rounded-[16px] text-[11px] font-black uppercase tracking-widest bg-[var(--color-primary)] text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              {updatingOrderId === order.id ? 'Accepting…' : 'Accept Order'}
+                            </button>
+                          )}
+                          {!isExpanded && isFrontScope(scope) && order.status === 'ready_for_handover' && (
+                            <button
+                              onClick={() => handleFrontServiceComplete(order)}
+                              disabled={!canComplete || updatingOrderId === order.id}
+                              className="w-full px-4 py-3.5 rounded-[16px] text-[11px] font-black uppercase tracking-widest bg-[var(--color-primary)] text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              {updatingOrderId === order.id ? 'Completing…' : 'Mark Complete'}
+                            </button>
+                          )}
+                          {!isExpanded && !isFrontScope(scope) && primaryStationAction && (
+                            <button
+                              onClick={() => handleStationAction(order, scope as PrepStation, primaryStationAction.action)}
+                              disabled={updatingOrderId === order.id}
+                              className="w-full px-4 py-3.5 rounded-[16px] text-[11px] font-black uppercase tracking-widest bg-[var(--color-primary)] text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              {updatingOrderId === order.id ? 'Updating…' : primaryStationAction.label}
+                            </button>
+                          )}
+
+                          <div className="flex items-end justify-between gap-3">
+                            <div className="min-w-0 space-y-0.5">
+                              <p className="font-semibold text-[var(--color-text)] flex items-center gap-1.5 min-w-0">
+                                <UserRound className="w-3.5 h-3.5 text-[var(--color-primary)] shrink-0" />
+                                <span className="truncate">{order.customer.name || order.assistedCustomerName || 'Walk-in'}</span>
+                              </p>
+                              {isFrontScope(scope) && (order.customer.phone || order.assistedCustomerPhoneNormalized) && (
+                                <p className="text-xs text-[var(--color-text-muted)] flex items-center gap-1 pl-5 truncate">
+                                  <Phone className="w-3 h-3 shrink-0" />
+                                  <span className="truncate">{order.customer.phone || order.assistedCustomerPhoneNormalized}</span>
                                 </p>
-                                <p className="text-sm text-[var(--color-text-muted)] capitalize">{formatServiceMode(order.serviceMode)}</p>
-                              </div>
-                            )}
-                          </button>
+                              )}
+                              <p className="text-xs text-[var(--color-text-muted)] capitalize pl-5">
+                                {isFrontScope(scope)
+                                  ? formatServiceMode(order.serviceMode)
+                                  : `${relevantTasks.length} ${relevantTasks.length === 1 ? 'task' : 'tasks'} · ${formatServiceMode(order.serviceMode)}`}
+                              </p>
+                              {(order.orderEntryMode === 'staff_assisted' || order.createdByStaffUid) && (
+                                <div className="pl-5 pt-1 flex flex-wrap gap-1.5">
+                                  <span className="rounded-full bg-[var(--color-primary)]/10 text-[var(--color-primary)] px-2 py-0.5 text-[9px] font-black uppercase tracking-wider">
+                                    Staff Assisted
+                                  </span>
+                                  {order.orderSource && (
+                                    <span className="rounded-full bg-[var(--color-bg-secondary)] border border-[var(--color-border)] px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-[var(--color-text-muted)]">
+                                      {order.orderSource.replace('_', ' ')}
+                                    </span>
+                                  )}
+                                  {order.checkoutPaymentChoice && (
+                                    <span className="rounded-full bg-[var(--color-bg-secondary)] border border-[var(--color-border)] px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-[var(--color-text-muted)]">
+                                      Checkout: {order.checkoutPaymentChoice.replace('_', ' ')}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className="text-base font-serif text-[var(--color-primary)]">{formatCurrency(order.total)}</p>
+                              <p className="text-[10px] text-[var(--color-text-muted)]">#{order.id.slice(-5)} · {formatTimeOnly(order.createdAt)}</p>
+                            </div>
+                          </div>
 
                           {isExpanded && (
-                            <div className="border-t border-[var(--color-border)] px-6 py-5 space-y-5 bg-[var(--color-bg)]/60">
+                            <div className="border-t border-[var(--color-border)] pt-4 space-y-5 bg-[var(--color-bg)]/60">
                               {isFrontScope(scope) && (
                                 isPendingFrontAcceptance ? (
                                   <section className="rounded-[24px] border border-[var(--color-border)] bg-white px-4 py-4 space-y-2">
@@ -682,6 +990,9 @@ export const OperationalOrdersBoard: React.FC<OperationalOrdersBoardProps> = ({ 
                                     {(order.frontAcceptedBy || order.completedBy) && (
                                       <div className="rounded-[24px] border border-[var(--color-border)] bg-white px-4 py-3 space-y-1">
                                         <p className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">Staff handling</p>
+                                        {order.createdByStaffName && (
+                                          <p className="text-sm text-[var(--color-text-muted)]">Created by {order.createdByStaffName}</p>
+                                        )}
                                         {order.frontAcceptedBy && (
                                           <p className="text-sm text-[var(--color-text-muted)]">Accepted by {order.frontAcceptedBy.displayName}</p>
                                         )}
@@ -842,16 +1153,16 @@ export const OperationalOrdersBoard: React.FC<OperationalOrdersBoardProps> = ({ 
                                     <button
                                       onClick={() => handleFrontServiceAccept(order)}
                                       disabled={order.status !== 'pending' || updatingOrderId === order.id}
-                                      className="px-4 py-3 rounded-[20px] text-[11px] font-black uppercase tracking-widest border bg-white text-[var(--color-text)] border-[var(--color-border)] disabled:opacity-40 disabled:cursor-not-allowed"
+                                      className="px-4 py-3 rounded-[20px] text-[11px] font-black uppercase tracking-widest border bg-[var(--color-primary)] text-white border-[var(--color-primary)] disabled:opacity-40 disabled:cursor-not-allowed"
                                     >
-                                      Accept
+                                      Accept Order
                                     </button>
                                     <button
                                       onClick={() => handleFrontServiceComplete(order)}
                                       disabled={!canComplete || order.status !== 'ready_for_handover' || updatingOrderId === order.id}
                                       className="px-4 py-3 rounded-[20px] text-[11px] font-black uppercase tracking-widest border bg-[var(--color-primary)] text-white border-[var(--color-primary)] disabled:opacity-40 disabled:cursor-not-allowed"
                                     >
-                                      Complete
+                                      Mark Complete
                                     </button>
                                   </div>
                                   {order.status === 'pending' && (
@@ -872,7 +1183,7 @@ export const OperationalOrdersBoard: React.FC<OperationalOrdersBoardProps> = ({ 
                                       <button
                                         onClick={() => primaryStationAction && handleStationAction(order, scope, primaryStationAction.action)}
                                         disabled={!primaryStationAction || updatingOrderId === order.id}
-                                        className="px-4 py-3 rounded-[20px] text-[11px] font-black uppercase tracking-widest border bg-white text-[var(--color-text)] border-[var(--color-border)] disabled:opacity-40 disabled:cursor-not-allowed"
+                                        className="px-4 py-3 rounded-[20px] text-[11px] font-black uppercase tracking-widest border bg-[var(--color-primary)] text-white border-[var(--color-primary)] disabled:opacity-40 disabled:cursor-not-allowed"
                                       >
                                         {primaryStationAction?.label || 'No Action'}
                                       </button>

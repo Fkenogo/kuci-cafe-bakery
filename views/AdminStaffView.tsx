@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, doc, onSnapshot, orderBy, query, serverTimestamp, setDoc } from 'firebase/firestore';
-import { AlertCircle, Loader2, Shield, UserCog } from 'lucide-react';
+import { AlertCircle, Copy, Loader2, Shield, UserCog, UserPlus, XCircle } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { AppUserRecord, UserRole } from '../types';
+import { createStaffInvite, revokeStaffInvite, StaffInviteRecord, subscribeStaffInvites } from '../lib/staffInvites';
 
 interface AdminStaffViewProps {
   isAdmin: boolean;
@@ -20,6 +21,13 @@ interface UserAccessFormState {
   shiftLabel: string;
 }
 
+interface InviteFormState {
+  role: Exclude<UserRole, 'user'>;
+  email: string;
+  phone: string;
+  expiresInDays: number;
+}
+
 const EMPTY_FORM: UserAccessFormState = {
   displayName: '',
   email: '',
@@ -29,6 +37,13 @@ const EMPTY_FORM: UserAccessFormState = {
   phone: '',
   staffCode: '',
   shiftLabel: '',
+};
+
+const EMPTY_INVITE_FORM: InviteFormState = {
+  role: 'front_service',
+  email: '',
+  phone: '',
+  expiresInDays: 7,
 };
 
 function formatRoleLabel(role: UserRole) {
@@ -46,6 +61,12 @@ export const AdminStaffView: React.FC<AdminStaffViewProps> = ({ isAdmin }) => {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<UserAccessFormState>(EMPTY_FORM);
+  const [invites, setInvites] = useState<StaffInviteRecord[]>([]);
+  const [inviteForm, setInviteForm] = useState<InviteFormState>(EMPTY_INVITE_FORM);
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [staffViewTab, setStaffViewTab] = useState<'staff' | 'invites' | 'access'>('staff');
 
   useEffect(() => {
     if (!isAdmin) {
@@ -74,6 +95,19 @@ export const AdminStaffView: React.FC<AdminStaffViewProps> = ({ isAdmin }) => {
     return unsubscribe;
   }, [isAdmin]);
 
+  useEffect(() => {
+    if (!isAdmin) return;
+    return subscribeStaffInvites(
+      (nextInvites) => {
+        setInvites(nextInvites);
+      },
+      (subscriptionError) => {
+        console.error('Failed to subscribe to staff invites:', subscriptionError);
+        setInviteError('Could not load staff invites right now.');
+      }
+    );
+  }, [isAdmin]);
+
   const groupedUsers = useMemo(() => {
     const roles: UserRole[] = [
       'user',
@@ -92,6 +126,7 @@ export const AdminStaffView: React.FC<AdminStaffViewProps> = ({ isAdmin }) => {
   }, [realUsers]);
 
   const startEditing = (user: AppUserRecord) => {
+    setStaffViewTab('access');
     setForm({
       uid: user.uid,
       displayName: user.displayName,
@@ -157,6 +192,53 @@ export const AdminStaffView: React.FC<AdminStaffViewProps> = ({ isAdmin }) => {
     }
   };
 
+  const handleCreateInvite = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!isAdmin) return;
+    try {
+      setInviteLoading(true);
+      setInviteError(null);
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + Math.max(1, Math.min(30, inviteForm.expiresInDays)));
+
+      const { claimPath } = await createStaffInvite({
+        role: inviteForm.role,
+        createdBy: 'admin',
+        expiresAt,
+        email: inviteForm.email,
+        phone: inviteForm.phone,
+      });
+
+      const fullLink = `${window.location.origin}${claimPath}`;
+      setInviteLink(fullLink);
+      setInviteForm(EMPTY_INVITE_FORM);
+    } catch (createError) {
+      console.error('Failed to create staff invite:', createError);
+      setInviteError('Could not create invite right now.');
+    } finally {
+      setInviteLoading(false);
+    }
+  };
+
+  const handleCopyInviteLink = async () => {
+    if (!inviteLink) return;
+    try {
+      await navigator.clipboard.writeText(inviteLink);
+    } catch (copyError) {
+      console.warn('Could not copy invite link:', copyError);
+    }
+  };
+
+  const handleRevokeInvite = async (invite: StaffInviteRecord) => {
+    try {
+      setInviteError(null);
+      await revokeStaffInvite(invite.id);
+    } catch (revokeError) {
+      console.error('Failed to revoke invite:', revokeError);
+      setInviteError('Could not revoke this invite right now.');
+    }
+  };
+
   if (!isAdmin) {
     return (
       <div className="px-4 py-12 space-y-4 text-center">
@@ -169,43 +251,168 @@ export const AdminStaffView: React.FC<AdminStaffViewProps> = ({ isAdmin }) => {
     );
   }
 
+  const activeStaffCount = realUsers.filter(u => u.isActive && u.role !== 'user').length;
+  const pendingInviteCount = invites.filter(i => i.status === 'pending').length;
+
   return (
-    <div className="px-4 py-8 space-y-6 pb-28">
-      <header className="space-y-2">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-3xl font-serif">User Access</h2>
-          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--color-primary)]">
-            {realUsers.length} {realUsers.length === 1 ? 'real user' : 'real users'}
-          </span>
-        </div>
-        <p className="text-sm text-[var(--color-text-muted)]">
-          Users sign in first, then admin upgrades their role. This screen manages real authenticated user accounts, not login credential creation.
-        </p>
+    <div className="px-4 py-5 space-y-4 pb-28">
+      <header className="flex items-center justify-between gap-3">
+        <h2 className="text-2xl font-serif">Staff Management</h2>
+        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--color-primary)]">
+          {realUsers.length} {realUsers.length === 1 ? 'user' : 'users'}
+        </span>
       </header>
 
-      {error && (
-        <div className="rounded-[28px] border border-red-200 bg-red-50 px-5 py-4 text-[11px] text-red-700 flex items-start gap-3">
+      {(error || inviteError) && (
+        <div className="rounded-[20px] border border-red-200 bg-red-50 px-4 py-3 text-[11px] text-red-700 flex items-start gap-3">
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-          <span>{error}</span>
+          <span>{error || inviteError}</span>
         </div>
       )}
 
-      <section className="rounded-[32px] border border-[var(--color-border)] bg-white px-5 py-5 space-y-4">
-        <div className="rounded-[24px] border border-[var(--color-primary)]/20 bg-[var(--color-primary)]/5 px-4 py-4 space-y-2 text-sm">
-          <p className="font-semibold text-[var(--color-text)]">Operational flow now</p>
-          <ol className="list-decimal pl-5 space-y-1 text-[var(--color-text-muted)]">
-            <li>Any person signs in first through Firebase Auth.</li>
-            <li>The app creates or updates their real `users/{'{uid}'}` profile.</li>
-            <li>Admin later upgrades that real user into cafe front, bakery front, prep, reconciliation, or admin roles.</li>
-          </ol>
-          <p className="text-xs text-[var(--color-text-muted)]">
-            Google and phone-auth users now land in the same `users/{'{uid}'}` collection, so admin role assignment works the same way for both.
-          </p>
-        </div>
+      <nav className="flex gap-1 rounded-[20px] border border-[var(--color-border)] bg-[var(--color-bg-secondary)]/40 p-1">
+        {([
+          { key: 'staff' as const, label: 'Active Staff', count: activeStaffCount },
+          { key: 'invites' as const, label: 'Invites', count: pendingInviteCount },
+          { key: 'access' as const, label: 'Manage Access', count: form.uid ? 1 : 0 },
+        ]).map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setStaffViewTab(tab.key)}
+            className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-2.5 rounded-[16px] text-[10px] font-black uppercase tracking-widest transition-all ${
+              staffViewTab === tab.key
+                ? 'bg-[var(--color-primary)] text-white shadow-sm'
+                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+            }`}
+          >
+            {tab.label}
+            {tab.count > 0 && (
+              <span className={`min-w-[16px] h-4 px-1 rounded-full text-[9px] font-black flex items-center justify-center ${
+                staffViewTab === tab.key ? 'bg-white/30 text-white' : 'bg-[var(--color-primary)]/15 text-[var(--color-primary)]'
+              }`}>{tab.count}</span>
+            )}
+          </button>
+        ))}
+      </nav>
 
+      {staffViewTab === 'invites' && (
+      <section className="rounded-[32px] border border-[var(--color-border)] bg-white px-5 py-5 space-y-4">
+        <div className="flex items-center gap-2">
+          <UserPlus className="w-5 h-5 text-[var(--color-primary)]" />
+          <h3 className="text-lg font-serif">Staff Invites</h3>
+        </div>
+        <p className="text-sm text-[var(--color-text-muted)]">
+          Invite links onboard staff into a predefined role. Keep links private.
+        </p>
+
+        <form onSubmit={handleCreateInvite} className="grid gap-3 md:grid-cols-2">
+          <label className="space-y-1">
+            <span className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">Role</span>
+            <select
+              value={inviteForm.role}
+              onChange={(event) => setInviteForm((prev) => ({ ...prev, role: event.target.value as Exclude<UserRole, 'user'> }))}
+              className="w-full rounded-[18px] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-3 text-sm"
+            >
+              <option value="front_service">Front Service</option>
+              <option value="bakery_front_service">Bakery Front Service</option>
+              <option value="kitchen">Kitchen</option>
+              <option value="barista">Barista</option>
+              <option value="bakery_account_reconciliation">Bakery Reconciliation</option>
+              <option value="cafe_account_reconciliation">Cafe Reconciliation</option>
+              <option value="admin">Admin</option>
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">Expires In (Days)</span>
+            <input
+              type="number"
+              min={1}
+              max={30}
+              value={inviteForm.expiresInDays}
+              onChange={(event) => setInviteForm((prev) => ({ ...prev, expiresInDays: Number(event.target.value) || 7 }))}
+              className="w-full rounded-[18px] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-3 text-sm"
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">Email (Optional)</span>
+            <input
+              value={inviteForm.email}
+              onChange={(event) => setInviteForm((prev) => ({ ...prev, email: event.target.value }))}
+              className="w-full rounded-[18px] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-3 text-sm"
+              placeholder="staff@kuci.rw"
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">Phone (Optional)</span>
+            <input
+              value={inviteForm.phone}
+              onChange={(event) => setInviteForm((prev) => ({ ...prev, phone: event.target.value }))}
+              className="w-full rounded-[18px] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-3 text-sm"
+              placeholder="+2507..."
+            />
+          </label>
+          <div className="md:col-span-2">
+            <button
+              type="submit"
+              disabled={inviteLoading}
+              className="px-4 py-3 rounded-[20px] text-[11px] font-black uppercase tracking-widest border bg-[var(--color-primary)] text-white border-[var(--color-primary)] disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {inviteLoading ? 'Creating...' : 'Create Invite'}
+            </button>
+          </div>
+        </form>
+
+        {inviteLink && (
+          <div className="rounded-[20px] border border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3 text-sm space-y-2">
+            <p className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">Latest Invite Link</p>
+            <p className="break-all text-xs text-[var(--color-text)]">{inviteLink}</p>
+            <button
+              onClick={handleCopyInviteLink}
+              className="inline-flex items-center gap-1 rounded-full border border-[var(--color-border)] px-3 py-1.5 text-[10px] font-black uppercase tracking-wider"
+            >
+              <Copy className="w-3 h-3" />
+              Copy Link
+            </button>
+          </div>
+        )}
+
+        <div className="space-y-2">
+          {invites.length === 0 ? (
+            <div className="rounded-[20px] border border-dashed border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3 text-sm text-[var(--color-text-muted)]">
+              No invites created yet.
+            </div>
+          ) : (
+            invites.slice(0, 12).map((invite) => (
+              <article key={invite.id} className="rounded-[20px] border border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-semibold text-sm">{formatRoleLabel(invite.role)}</p>
+                  <p className="text-xs text-[var(--color-text-muted)] truncate">
+                    {invite.email || invite.phone || 'Open invite'} · {invite.status}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {invite.status === 'pending' && (
+                    <button
+                      onClick={() => handleRevokeInvite(invite)}
+                      className="inline-flex items-center gap-1 rounded-full border border-red-300 bg-red-50 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-red-700"
+                    >
+                      <XCircle className="w-3 h-3" />
+                      Revoke
+                    </button>
+                  )}
+                </div>
+              </article>
+            ))
+          )}
+        </div>
+      </section>
+      )}
+
+      {staffViewTab === 'access' && (
+      <section className="rounded-[32px] border border-[var(--color-border)] bg-white px-5 py-5 space-y-4">
         <div className="flex items-center gap-2">
           <UserCog className="w-5 h-5 text-[var(--color-primary)]" />
-          <h3 className="text-lg font-serif">{form.uid ? 'Edit User Access' : 'Select A Signed-In User'}</h3>
+          <h3 className="text-lg font-serif">{form.uid ? 'Edit Staff Access' : 'Manage Staff Access'}</h3>
         </div>
 
         {form.uid ? (
@@ -306,11 +513,13 @@ export const AdminStaffView: React.FC<AdminStaffViewProps> = ({ isAdmin }) => {
           </form>
         ) : (
           <div className="rounded-[24px] border border-dashed border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-4 text-sm text-[var(--color-text-muted)]">
-            Ask the user to sign in first. Once their real account appears below, you can assign a staff role and metadata here.
+            Select a staff member from the <button className="underline text-[var(--color-primary)]" onClick={() => setStaffViewTab('staff')}>Active Staff</button> tab to update their role or metadata. New staff should join through the <button className="underline text-[var(--color-primary)]" onClick={() => setStaffViewTab('invites')}>Invites</button> tab.
           </div>
         )}
       </section>
+      )}
 
+      {staffViewTab === 'staff' && (<>
       {legacyProfiles.length > 0 && (
         <section className="rounded-[28px] border border-amber-200 bg-amber-50 px-5 py-5 space-y-3">
           <h3 className="text-lg font-serif">Legacy Placeholder Profiles</h3>
@@ -398,6 +607,7 @@ export const AdminStaffView: React.FC<AdminStaffViewProps> = ({ isAdmin }) => {
           ))}
         </div>
       )}
+      </>)}
     </div>
   );
 };

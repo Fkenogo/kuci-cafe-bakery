@@ -41,6 +41,7 @@ interface AdminFilters {
   dateRange: QueueDateRange;
   serviceMode: 'all' | OrderServiceMode;
   station: 'all' | PrepStation;
+  entryMode: 'all' | 'staff_assisted' | 'customer_self';
   search: string;
   activeOnly: boolean;
   assigneeId?: string;
@@ -121,6 +122,7 @@ export const AdminOrdersView: React.FC<AdminOrdersViewProps> = ({ isAdmin, curre
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedOrderIds, setExpandedOrderIds] = useState<Record<string, boolean>>({});
+  const [showFilters, setShowFilters] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>(() => {
     if (typeof window === 'undefined') return {};
     try {
@@ -135,6 +137,7 @@ export const AdminOrdersView: React.FC<AdminOrdersViewProps> = ({ isAdmin, curre
     dateRange: 'all',
     serviceMode: 'all',
     station: 'all',
+    entryMode: 'all',
     search: '',
     activeOnly: true,
   });
@@ -295,8 +298,13 @@ export const AdminOrdersView: React.FC<AdminOrdersViewProps> = ({ isAdmin, curre
         return false;
       }
 
+      if (filters.entryMode !== 'all') {
+        const mode = order.orderEntryMode || 'customer_self';
+        if (mode !== filters.entryMode) return false;
+      }
+
       if (filters.activeOnly) {
-        if (order.status === 'completed') return false;
+        if (order.status === 'completed' && filters.status !== 'completed') return false;
         if (order.status === 'rejected' && filters.status !== 'rejected') return false;
       }
 
@@ -449,30 +457,160 @@ export const AdminOrdersView: React.FC<AdminOrdersViewProps> = ({ isAdmin, curre
     );
   }
 
+  const getSectionColor = (key: OrderStatus) => {
+    if (key === 'pending') return 'border-amber-300 bg-amber-50 text-amber-900';
+    if (key === 'front_accepted') return 'border-blue-200 bg-blue-50 text-blue-900';
+    if (key === 'in_progress') return 'border-sky-300 bg-sky-50 text-sky-900';
+    if (key === 'ready_for_handover') return 'border-emerald-300 bg-emerald-50 text-emerald-900';
+    if (key === 'rejected') return 'border-red-300 bg-red-50 text-red-900';
+    if (key === 'completed') return 'border-gray-200 bg-gray-50 text-gray-700';
+    return 'border-[var(--color-border)] bg-white text-[var(--color-text)]';
+  };
+
+  const getSectionDot = (key: OrderStatus) => {
+    if (key === 'pending') return 'bg-amber-400';
+    if (key === 'front_accepted') return 'bg-blue-400';
+    if (key === 'in_progress') return 'bg-sky-500';
+    if (key === 'ready_for_handover') return 'bg-emerald-500';
+    if (key === 'rejected') return 'bg-red-500';
+    if (key === 'completed') return 'bg-gray-400';
+    return 'bg-[var(--color-primary)]';
+  };
+
   return (
-    <div className="px-4 py-8 space-y-6 pb-28">
-      <header className="space-y-2">
-        <div className="flex items-center justify-between">
-          <h2 className="text-3xl font-serif">Admin Orders</h2>
-          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--color-primary)]">{orderCountLabel}</span>
+    <div className="px-4 py-5 space-y-4 pb-28">
+      <header className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-serif">Orders</h2>
+          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{activeBusinessDateLabel} · {orderCountLabel}</p>
         </div>
-        <p className="text-sm text-[var(--color-text-muted)]">All orders grouped by operational status.</p>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setFilters((prev) => ({ ...prev, activeOnly: !prev.activeOnly }))}
+            className={`px-3 py-2 rounded-full text-[10px] font-black uppercase tracking-widest border transition-colors ${
+              filters.activeOnly
+                ? 'bg-[var(--color-primary)] text-white border-[var(--color-primary)]'
+                : 'bg-white text-[var(--color-text)] border-[var(--color-border)]'
+            }`}
+          >
+            {filters.activeOnly ? 'Active Only' : 'All'}
+          </button>
+          <button
+            onClick={() => setShowFilters(prev => !prev)}
+            className="px-3 py-2 rounded-full text-[10px] font-black uppercase tracking-widest border border-[var(--color-border)] bg-white flex items-center gap-1"
+          >
+            <Search className="w-3 h-3" />
+            Filters
+          </button>
+        </div>
       </header>
 
-      <section className="rounded-[24px] border border-[var(--color-border)] bg-white px-4 py-4 space-y-3">
+      {showFilters && (
+      <section className="rounded-[20px] border border-[var(--color-border)] bg-white px-4 py-4 space-y-3">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <label className="space-y-1">
+            <span className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">Section</span>
+            <select
+              value={filters.status}
+              onChange={(event) => setFilters((prev) => ({ ...prev, status: event.target.value as AdminFilters['status'] }))}
+              className="w-full rounded-[14px] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 text-sm"
+            >
+              <option value="all">All statuses</option>
+              <option value="pending">Pending</option>
+              <option value="front_accepted">Front accepted</option>
+              <option value="in_progress">In progress</option>
+              <option value="ready_for_handover">Ready for handover</option>
+              <option value="rejected">Rejected</option>
+              <option value="completed">Completed</option>
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">Service Mode</span>
+            <select
+              value={filters.serviceMode}
+              onChange={(event) => setFilters((prev) => ({ ...prev, serviceMode: event.target.value as AdminFilters['serviceMode'] }))}
+              className="w-full rounded-[14px] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 text-sm"
+            >
+              <option value="all">All</option>
+              <option value="pickup">Pickup</option>
+              <option value="dine_in">Dine-In</option>
+              <option value="delivery">Delivery</option>
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">Station</span>
+            <select
+              value={filters.station}
+              onChange={(event) => setFilters((prev) => ({ ...prev, station: event.target.value as AdminFilters['station'] }))}
+              className="w-full rounded-[14px] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 text-sm"
+            >
+              <option value="all">All</option>
+              <option value="kitchen">Kitchen</option>
+              <option value="barista">Barista</option>
+            </select>
+          </label>
+          <label className="space-y-1">
+            <span className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">Entry Mode</span>
+            <select
+              value={filters.entryMode}
+              onChange={(event) => setFilters((prev) => ({ ...prev, entryMode: event.target.value as AdminFilters['entryMode'] }))}
+              className="w-full rounded-[14px] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 text-sm"
+            >
+              <option value="all">All orders</option>
+              <option value="staff_assisted">Staff assisted only</option>
+              <option value="customer_self">Customer self only</option>
+            </select>
+          </label>
+          <label className="space-y-1 md:col-span-2">
+            <span className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">Search</span>
+            <div className="flex items-center gap-2 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-bg)] px-3">
+              <Search className="w-4 h-4 text-[var(--color-text-muted)]" />
+              <input
+                value={filters.search}
+                onChange={(event) => setFilters((prev) => ({ ...prev, search: event.target.value }))}
+                placeholder="Customer, phone, or order ID"
+                className="w-full bg-transparent py-2.5 text-sm outline-none"
+              />
+            </div>
+          </label>
+        </div>
+      </section>
+      )}
+
+      <section className="rounded-[18px] border border-[var(--color-border)]/50 bg-[var(--color-bg-secondary)]/30 px-3 py-2 flex flex-wrap items-center gap-2">
+        <span className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)] mr-1">Today:</span>
+        {[
+          { key: 'pending' as OrderStatus, label: 'Pending', count: activeDayOrders.filter(o => o.status === 'pending').length },
+          { key: 'in_progress' as OrderStatus, label: 'In Progress', count: activeDayOrders.filter(o => o.status === 'in_progress').length },
+          { key: 'ready_for_handover' as OrderStatus, label: 'Ready', count: activeDayOrders.filter(o => o.status === 'ready_for_handover').length },
+          { key: 'completed' as OrderStatus, label: 'Done', count: activeDayOrders.filter(o => o.status === 'completed').length },
+          { key: 'rejected' as OrderStatus, label: 'Rejected', count: activeDayOrders.filter(o => o.status === 'rejected').length },
+        ].map(stat => (
+          <button
+            key={stat.key}
+            onClick={() => setFilters(prev => ({ ...prev, status: prev.status === stat.key ? 'all' : stat.key }))}
+            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest transition-colors ${
+              filters.status === stat.key ? 'bg-[var(--color-primary)] text-white' : 'bg-white border border-[var(--color-border)]'
+            }`}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${getSectionDot(stat.key)}`} />
+            {stat.label}
+            {stat.count > 0 && <span>{stat.count}</span>}
+          </button>
+        ))}
+      </section>
+
+      <section className="rounded-[18px] border border-[var(--color-border)] bg-white px-4 py-3 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h3 className="text-sm font-black uppercase tracking-widest">Pilot Smoke-Test Support</h3>
-            <p className="text-xs text-[var(--color-text-muted)]">
-              Admin-only stabilization checks for {pilotBusinessDateLabel} (active day: {activeBusinessDateLabel}).
-            </p>
+            <h3 className="text-xs font-black uppercase tracking-widest text-[var(--color-text-muted)]">Ops Panel · {pilotBusinessDateLabel}</h3>
           </div>
           <button
             type="button"
             onClick={() => setShowPilotPanel((prev) => !prev)}
-            className="rounded-full border border-[var(--color-border)] px-3 py-1 text-xs font-bold uppercase tracking-wider"
+            className="rounded-full border border-[var(--color-border)] px-3 py-1 text-[10px] font-bold uppercase tracking-wider"
           >
-            {showPilotPanel ? 'Hide' : 'Show'} Pilot Panel
+            {showPilotPanel ? 'Hide' : 'Smoke-Test Panel'}
           </button>
         </div>
 
@@ -539,96 +677,6 @@ export const AdminOrdersView: React.FC<AdminOrdersViewProps> = ({ isAdmin, curre
         )}
       </section>
 
-      <section className="rounded-[28px] border border-[var(--color-border)] bg-white px-4 py-4 space-y-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            onClick={() => setFilters((prev) => ({ ...prev, activeOnly: !prev.activeOnly }))}
-            className={`px-4 py-2 rounded-full text-[11px] font-black uppercase tracking-widest border ${
-              filters.activeOnly
-                ? 'bg-[var(--color-primary)] text-white border-[var(--color-primary)]'
-                : 'bg-white text-[var(--color-text)] border-[var(--color-border)]'
-            }`}
-          >
-            {filters.activeOnly ? 'Active Only' : 'All Orders'}
-          </button>
-          <p className="text-xs text-[var(--color-text-muted)]">
-            Future-ready hook: filter state reserves `assigneeId` for accepted-by filtering later.
-          </p>
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-          <label className="space-y-1">
-            <span className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">Section</span>
-            <select
-              value={filters.status}
-              onChange={(event) => setFilters((prev) => ({ ...prev, status: event.target.value as AdminFilters['status'] }))}
-              className="w-full rounded-[18px] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-3 text-sm"
-            >
-              <option value="all">All sections</option>
-              <option value="pending">Pending</option>
-              <option value="front_accepted">Front accepted</option>
-              <option value="in_progress">In progress</option>
-              <option value="ready_for_handover">Ready for handover</option>
-              <option value="rejected">Rejected</option>
-              <option value="completed">Completed</option>
-            </select>
-          </label>
-
-          <label className="space-y-1">
-            <span className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">Date Range</span>
-            <select
-              value={filters.dateRange}
-              onChange={(event) => setFilters((prev) => ({ ...prev, dateRange: event.target.value as QueueDateRange }))}
-              className="w-full rounded-[18px] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-3 text-sm"
-            >
-              <option value="today">Today</option>
-              <option value="yesterday">Yesterday</option>
-              <option value="last_7_days">Last 7 Days</option>
-              <option value="all">All</option>
-            </select>
-          </label>
-
-          <label className="space-y-1">
-            <span className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">Service Mode</span>
-            <select
-              value={filters.serviceMode}
-              onChange={(event) => setFilters((prev) => ({ ...prev, serviceMode: event.target.value as AdminFilters['serviceMode'] }))}
-              className="w-full rounded-[18px] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-3 text-sm"
-            >
-              <option value="all">All</option>
-              <option value="pickup">Pickup</option>
-              <option value="dine_in">Dine-In</option>
-              <option value="delivery">Delivery</option>
-            </select>
-          </label>
-
-          <label className="space-y-1">
-            <span className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">Station</span>
-            <select
-              value={filters.station}
-              onChange={(event) => setFilters((prev) => ({ ...prev, station: event.target.value as AdminFilters['station'] }))}
-              className="w-full rounded-[18px] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-3 text-sm"
-            >
-              <option value="all">All</option>
-              <option value="kitchen">Kitchen</option>
-              <option value="barista">Barista</option>
-            </select>
-          </label>
-
-          <label className="space-y-1">
-            <span className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">Search</span>
-            <div className="flex items-center gap-2 rounded-[18px] border border-[var(--color-border)] bg-[var(--color-bg)] px-3">
-              <Search className="w-4 h-4 text-[var(--color-text-muted)]" />
-              <input
-                value={filters.search}
-                onChange={(event) => setFilters((prev) => ({ ...prev, search: event.target.value }))}
-                placeholder="Customer, phone, or order ID"
-                className="w-full bg-transparent py-3 text-sm outline-none"
-              />
-            </div>
-          </label>
-        </div>
-      </section>
 
       {error && (
         <div className="rounded-[28px] border border-red-200 bg-red-50 px-5 py-4 text-[11px] text-red-700 flex items-start gap-3">
@@ -659,30 +707,28 @@ export const AdminOrdersView: React.FC<AdminOrdersViewProps> = ({ isAdmin, curre
           {sections.length === 0 ? (
             <div className="bg-[var(--color-bg)] border-2 border-dashed border-[var(--color-border)] rounded-[40px] p-10 text-center space-y-3">
               <ShoppingBag className="w-8 h-8 mx-auto text-[var(--color-primary)]" />
-              <h3 className="text-xl font-serif">No active-day orders</h3>
+              <h3 className="text-xl font-serif">{filters.activeOnly ? 'No active orders right now' : 'No orders found'}</h3>
               <p className="text-sm text-[var(--color-text-muted)]">No current-day orders match the active queue filters.</p>
             </div>
           ) : sections.map((section) => {
             const isCollapsed = section.key in collapsedSections ? collapsedSections[section.key] : getDefaultSectionCollapsed(section.key);
 
             return (
-              <section key={section.key} className="space-y-4">
+              <section key={section.key} className="space-y-3">
                 <button
                   onClick={() => toggleSection(section.key)}
-                  className="w-full rounded-[24px] border border-[var(--color-border)] bg-white px-4 py-4 text-left"
+                  className={`w-full rounded-[20px] border px-4 py-3 text-left transition-colors ${getSectionColor(section.key)}`}
                 >
                   <div className="flex items-center justify-between gap-4">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-3">
-                        <h3 className="text-lg font-serif">{section.title}</h3>
-                        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--color-primary)]">
-                          {section.orders.length} {section.orders.length === 1 ? 'order' : 'orders'}
-                        </span>
-                      </div>
-                      <p className="text-xs text-[var(--color-text-muted)]">{section.description}</p>
+                    <div className="flex items-center gap-3">
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${getSectionDot(section.key)}`} />
+                      <h3 className="text-base font-black uppercase tracking-wider">{section.title}</h3>
+                      <span className="text-[10px] font-black uppercase tracking-widest opacity-70">
+                        {section.orders.length}
+                      </span>
                     </div>
-                    <div className="text-[var(--color-text-muted)]">
-                      {isCollapsed ? <ChevronDown className="w-5 h-5" /> : <ChevronUp className="w-5 h-5" />}
+                    <div className="opacity-60">
+                      {isCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
                     </div>
                   </div>
                 </button>
@@ -731,6 +777,11 @@ export const AdminOrdersView: React.FC<AdminOrdersViewProps> = ({ isAdmin, curre
                                   <Phone className="w-4 h-4 text-[var(--color-primary)] shrink-0" />
                                   <span className="truncate">{order.customer.phone}</span>
                                 </p>
+                                {order.orderEntryMode === 'staff_assisted' && (
+                                  <p className="text-[9px] font-black uppercase tracking-widest text-[var(--color-primary)]/70 truncate">
+                                    Assisted by {order.createdByStaffName || '—'}
+                                  </p>
+                                )}
                               </div>
                               <div className="space-y-1 text-right">
                                 <p className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">Service</p>
@@ -752,9 +803,12 @@ export const AdminOrdersView: React.FC<AdminOrdersViewProps> = ({ isAdmin, curre
                                 </section>
                               ) : (
                                 <section className="space-y-3">
-                                  {(order.frontAcceptedBy || order.completedBy) && (
+                                  {(order.frontAcceptedBy || order.completedBy || order.orderEntryMode === 'staff_assisted') && (
                                     <div className="rounded-[24px] border border-[var(--color-border)] bg-white px-4 py-3 space-y-1">
                                       <p className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">Staff handling</p>
+                                      {order.orderEntryMode === 'staff_assisted' && (
+                                        <p className="text-sm text-[var(--color-text-muted)]">Assisted by <span className="font-semibold text-[var(--color-text)]">{order.createdByStaffName || '—'}</span></p>
+                                      )}
                                       {order.frontAcceptedBy && (
                                         <p className="text-sm text-[var(--color-text-muted)]">Accepted by {order.frontAcceptedBy.displayName}</p>
                                       )}
@@ -851,14 +905,14 @@ export const AdminOrdersView: React.FC<AdminOrdersViewProps> = ({ isAdmin, curre
                                     disabled={order.status !== 'pending' || isUpdatingThisOrder}
                                     className="px-4 py-3 rounded-[20px] text-[11px] font-black uppercase tracking-widest border bg-white text-[var(--color-text)] border-[var(--color-border)] disabled:opacity-40 disabled:cursor-not-allowed"
                                   >
-                                    Front Accept
+                                    Accept Order
                                   </button>
                                   <button
                                     onClick={() => handleComplete(order)}
                                     disabled={!canCompleteOrder(order, menuItems) || order.status !== 'ready_for_handover' || isUpdatingThisOrder}
                                     className="px-4 py-3 rounded-[20px] text-[11px] font-black uppercase tracking-widest border bg-[var(--color-primary)] text-white border-[var(--color-primary)] disabled:opacity-40 disabled:cursor-not-allowed"
                                   >
-                                    Complete
+                                    Mark Complete
                                   </button>
                                 </div>
                                 {order.status === 'pending' && (
@@ -944,7 +998,7 @@ export const AdminOrdersView: React.FC<AdminOrdersViewProps> = ({ isAdmin, curre
                           disabled={!canRecoverComplete || isUpdating}
                           className="px-4 py-3 rounded-[18px] text-[11px] font-black uppercase tracking-widest border bg-[var(--color-primary)] text-white border-[var(--color-primary)] disabled:opacity-40 disabled:cursor-not-allowed"
                         >
-                          Complete Stale Order
+                          Mark Complete
                         </button>
                         <button
                           onClick={() => handleRecoverCancel(order)}

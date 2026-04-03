@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, ClipboardCheck, Loader2, Save } from 'lucide-react';
+import { AlertCircle, ChevronDown, ClipboardCheck, Loader2, Save } from 'lucide-react';
 import {
   collection,
   doc,
@@ -25,6 +25,7 @@ import {
   PersistedOrder,
 } from '../types';
 import {
+  aggregateCapturedPayments,
   buildReconciliationAuditRows,
   computeSettlementTotals,
   summarizeAuditRows,
@@ -42,7 +43,6 @@ import {
 } from '../lib/bakeryReconciliation';
 import { formatBusinessDateDisplay, parseBusinessDateInput, toBusinessDate } from '../lib/businessDate';
 import { isStaleOrder, isTerminalOrderStatus, resolveOrderBusinessDate } from '../lib/orderDayLifecycle';
-import { toStaffIdentity } from '../lib/orderRouting';
 import { buildCafeTotals } from '../lib/cafeReconciliation';
 
 interface ReconciliationViewProps {
@@ -238,8 +238,11 @@ function normalizeReconciliationDoc(id: string, value: unknown): BakeryDailyReco
     updatedAt: record.updatedAt || null,
     ...(record.openedBy ? { openedBy: record.openedBy as BakeryDailyReconciliation['openedBy'] } : {}),
     ...(record.lastUpdatedBy ? { lastUpdatedBy: record.lastUpdatedBy as BakeryDailyReconciliation['lastUpdatedBy'] } : {}),
+    ...(record.lastUpdatedAt ? { lastUpdatedAt: record.lastUpdatedAt } : {}),
     ...(record.closedBy ? { closedBy: record.closedBy as BakeryDailyReconciliation['closedBy'] } : {}),
     ...(record.closedAt ? { closedAt: record.closedAt } : {}),
+    ...(record.reopenedBy ? { reopenedBy: record.reopenedBy as BakeryDailyReconciliation['reopenedBy'] } : {}),
+    ...(record.reopenedAt ? { reopenedAt: record.reopenedAt } : {}),
     ...(typeof record.notes === 'string' ? { notes: record.notes } : {}),
     ...(record.settlement && typeof record.settlement === 'object'
       ? { settlement: record.settlement as ReconciliationSettlementTotals }
@@ -293,8 +296,11 @@ function normalizeCafeReconciliationDoc(id: string, value: unknown): CafeDailyRe
     updatedAt: record.updatedAt || null,
     ...(record.openedBy ? { openedBy: record.openedBy as CafeDailyReconciliation['openedBy'] } : {}),
     ...(record.lastUpdatedBy ? { lastUpdatedBy: record.lastUpdatedBy as CafeDailyReconciliation['lastUpdatedBy'] } : {}),
+    ...(record.lastUpdatedAt ? { lastUpdatedAt: record.lastUpdatedAt } : {}),
     ...(record.closedBy ? { closedBy: record.closedBy as CafeDailyReconciliation['closedBy'] } : {}),
     ...(record.closedAt ? { closedAt: record.closedAt } : {}),
+    ...(record.reopenedBy ? { reopenedBy: record.reopenedBy as CafeDailyReconciliation['reopenedBy'] } : {}),
+    ...(record.reopenedAt ? { reopenedAt: record.reopenedAt } : {}),
     ...(record.cashControl && typeof record.cashControl === 'object'
       ? { cashControl: record.cashControl as ReconciliationCashControl }
       : {}),
@@ -370,7 +376,54 @@ function normalizeOrder(id: string, value: unknown): PersistedOrder | null {
     status: record.status === 'pending' || record.status === 'front_accepted' || record.status === 'in_progress' || record.status === 'ready_for_handover' || record.status === 'completed' || record.status === 'rejected'
       ? record.status
       : 'pending',
-    paymentStatus: 'pending',
+    paymentStatus:
+      record.paymentStatus === 'paid' || record.paymentStatus === 'complimentary' || record.paymentStatus === 'credit'
+        ? record.paymentStatus
+        : 'pending',
+    ...(record.payment && typeof record.payment === 'object'
+      ? {
+          payment: {
+            method:
+              (record.payment as Record<string, unknown>).method === 'cash' ||
+              (record.payment as Record<string, unknown>).method === 'mobile_money' ||
+              (record.payment as Record<string, unknown>).method === 'bank_transfer' ||
+              (record.payment as Record<string, unknown>).method === 'other'
+                ? ((record.payment as Record<string, unknown>).method as 'cash' | 'mobile_money' | 'bank_transfer' | 'other')
+                : null,
+            amountReceived:
+              typeof (record.payment as Record<string, unknown>).amountReceived === 'number'
+                ? Math.max(0, (record.payment as Record<string, unknown>).amountReceived as number)
+                : 0,
+            currency:
+              typeof (record.payment as Record<string, unknown>).currency === 'string'
+                ? ((record.payment as Record<string, unknown>).currency as string)
+                : 'RWF',
+            isComplimentary: (record.payment as Record<string, unknown>).isComplimentary === true,
+            isCredit: (record.payment as Record<string, unknown>).isCredit === true,
+            recordedBy:
+              (record.payment as Record<string, unknown>).recordedBy &&
+              typeof (record.payment as Record<string, unknown>).recordedBy === 'object'
+                ? ((record.payment as Record<string, unknown>).recordedBy as PersistedOrder['accountingUpdatedBy'])
+                : null,
+            recordedAt: (record.payment as Record<string, unknown>).recordedAt || null,
+          },
+        }
+      : {}),
+    ...(record.financialStatus === 'unpaid' || record.financialStatus === 'paid' || record.financialStatus === 'complimentary' || record.financialStatus === 'credit'
+      ? { financialStatus: record.financialStatus }
+      : {}),
+    ...(record.receipt && typeof record.receipt === 'object'
+      ? {
+          receipt: {
+            receiptNumber:
+              typeof (record.receipt as Record<string, unknown>).receiptNumber === 'string'
+                ? (record.receipt as Record<string, unknown>).receiptNumber as string
+                : '',
+            generatedAt: (record.receipt as Record<string, unknown>).generatedAt || null,
+            visibleToCustomer: (record.receipt as Record<string, unknown>).visibleToCustomer === true,
+          },
+        }
+      : {}),
     serviceMode: record.serviceMode === 'pickup' || record.serviceMode === 'delivery' ? record.serviceMode : 'dine_in',
     serviceArea: record.serviceArea === 'bakery' || record.serviceArea === 'mixed' ? record.serviceArea : 'cafe',
     frontLane: record.frontLane === 'bakery_front' ? 'bakery_front' : 'cafe_front',
@@ -477,12 +530,19 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({ isAllowe
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [writeSummary, setWriteSummary] = useState<WriteSummary | null>(null);
+  const [cafeItemSearch, setCafeItemSearch] = useState('');
+  const [cafeItemServiceModeFilter, setCafeItemServiceModeFilter] = useState<'all' | 'pickup' | 'dine_in' | 'delivery'>('all');
+  const [cafeItemPaymentFilter, setCafeItemPaymentFilter] = useState<'all' | 'cash' | 'mobile_money' | 'pay_later'>('all');
   const businessDateLabel = formatBusinessDateDisplay(businessDate);
 
-  const canEditBakery = currentUser?.role === 'admin' || currentUser?.role === 'bakery_account_reconciliation';
-  const canEditCafe = currentUser?.role === 'admin' || currentUser?.role === 'cafe_account_reconciliation';
+  const isAdminReconciliationManager = currentUser?.role === 'admin';
+  const canEditBakery = isAdminReconciliationManager || currentUser?.role === 'bakery_account_reconciliation';
+  const canEditCafe = isAdminReconciliationManager || currentUser?.role === 'cafe_account_reconciliation';
   const canEditBakeryAccounting = currentUser?.role === 'admin' || currentUser?.role === 'bakery_account_reconciliation';
   const canEditCafeAccounting = currentUser?.role === 'admin' || currentUser?.role === 'cafe_account_reconciliation';
+  const canManageBakeryLifecycle = isAdminReconciliationManager;
+  const canManageCafeLifecycle = isAdminReconciliationManager;
+  const canReadBakeryInventory = isAdminReconciliationManager || currentUser?.role === 'bakery_account_reconciliation';
   const availableModes = useMemo(() => {
     const next: Array<'bakery' | 'cafe'> = [];
     if (currentUser?.role === 'admin' || currentUser?.role === 'bakery_account_reconciliation') next.push('bakery');
@@ -492,7 +552,13 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({ isAllowe
     }
     return next;
   }, [currentUser?.role]);
-  const actor = useMemo(() => toStaffIdentity(currentUser), [currentUser]);
+  const actor = useMemo(
+    () =>
+      currentUser && currentUser.role !== 'user'
+        ? { uid: currentUser.uid, displayName: currentUser.displayName, role: currentUser.role }
+        : null,
+    [currentUser]
+  );
 
   useEffect(() => {
     if (!availableModes.includes(mode)) {
@@ -506,21 +572,26 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({ isAllowe
       return;
     }
 
-    const unsubItems = onSnapshot(
-      query(collection(db, 'bakeryItems')),
-      (snapshot) => {
-        const next = snapshot.docs.flatMap((itemDoc) => {
-          const normalized = normalizeBakeryItem(itemDoc.id, itemDoc.data());
-          return normalized ? [normalized] : [];
-        });
-        setBakeryItems(next.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0)));
-        setLoading(false);
-      },
-      (snapshotError) => {
-        setError(snapshotError instanceof Error ? snapshotError.message : 'Failed to load bakery items.');
-        setLoading(false);
-      }
-    );
+    const unsubItems = canReadBakeryInventory
+      ? onSnapshot(
+          query(collection(db, 'bakeryItems')),
+          (snapshot) => {
+            const next = snapshot.docs.flatMap((itemDoc) => {
+              const normalized = normalizeBakeryItem(itemDoc.id, itemDoc.data());
+              return normalized ? [normalized] : [];
+            });
+            setBakeryItems(next.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0)));
+            setLoading(false);
+          },
+          (snapshotError) => {
+            setError(snapshotError instanceof Error ? snapshotError.message : 'Failed to load bakery items.');
+            setLoading(false);
+          }
+        )
+      : () => {
+          setBakeryItems([]);
+          setLoading(false);
+        };
 
     const unsubOrders = onSnapshot(
       query(collection(db, 'orders'), orderBy('createdAt', 'desc')),
@@ -536,26 +607,30 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({ isAllowe
       }
     );
 
-    const unsubSnapshots = onSnapshot(
-      query(collection(db, 'bakeryStockSnapshots'), orderBy('businessDate', 'desc')),
-      (snapshot) => {
-        const next = snapshot.docs.flatMap((snapDoc) => {
-          const normalized = normalizeSnapshot(snapDoc.id, snapDoc.data());
-          return normalized ? [normalized] : [];
-        });
-        setSnapshots(next);
-      },
-      (snapshotError) => {
-        setError(snapshotError instanceof Error ? snapshotError.message : 'Failed to load stock snapshots.');
-      }
-    );
+    const unsubSnapshots = canReadBakeryInventory
+      ? onSnapshot(
+          query(collection(db, 'bakeryStockSnapshots'), orderBy('businessDate', 'desc')),
+          (snapshot) => {
+            const next = snapshot.docs.flatMap((snapDoc) => {
+              const normalized = normalizeSnapshot(snapDoc.id, snapDoc.data());
+              return normalized ? [normalized] : [];
+            });
+            setSnapshots(next);
+          },
+          (snapshotError) => {
+            setError(snapshotError instanceof Error ? snapshotError.message : 'Failed to load stock snapshots.');
+          }
+        )
+      : () => {
+          setSnapshots([]);
+        };
 
     return () => {
       unsubItems();
       unsubOrders();
       unsubSnapshots();
     };
-  }, [isAllowed]);
+  }, [isAllowed, canReadBakeryInventory]);
 
   useEffect(() => {
     if (!isAllowed) return;
@@ -728,16 +803,19 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({ isAllowe
 
   const bakeryOrderSummary = useMemo(() => summarizeAuditRows(bakeryAuditRows, 'bakery'), [bakeryAuditRows]);
   const cafeOrderMetrics = useMemo(() => summarizeAuditRows(cafeOrderAuditRows, 'cafe'), [cafeOrderAuditRows]);
+  const bakeryCapturedPayments = useMemo(
+    () => aggregateCapturedPayments(orders, businessDate, 'bakery'),
+    [orders, businessDate]
+  );
+  const cafeCapturedPayments = useMemo(
+    () => aggregateCapturedPayments(orders, businessDate, 'cafe'),
+    [orders, businessDate]
+  );
 
   const bakerySettlementTotals = useMemo(
     () =>
-      computeSettlementTotals(bakeryOrderSummary, {
-        cashReceived: bakerySettlementDraft.cashReceived,
-        mobileMoneyReceived: bakerySettlementDraft.mobileMoneyReceived,
-        bankReceived: bakerySettlementDraft.bankReceived,
-        otherReceived: bakerySettlementDraft.otherReceived,
-      }),
-    [bakeryOrderSummary, bakerySettlementDraft]
+      computeSettlementTotals(bakeryOrderSummary, bakeryCapturedPayments),
+    [bakeryOrderSummary, bakeryCapturedPayments]
   );
   const bakeryCashControl = useMemo(
     () => computeCashControl(bakerySettlementTotals, bakeryCashDraft),
@@ -746,13 +824,8 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({ isAllowe
 
   const cafeTotals = useMemo(
     () =>
-      buildCafeTotals(cafeOrderMetrics, {
-        cashReceived: cafeDraft.cashReceived,
-        mobileMoneyReceived: cafeDraft.mobileMoneyReceived,
-        bankReceived: cafeDraft.bankReceived,
-        otherReceived: cafeDraft.otherReceived,
-      }),
-    [cafeOrderMetrics, cafeDraft]
+      buildCafeTotals(cafeOrderMetrics, cafeCapturedPayments),
+    [cafeOrderMetrics, cafeCapturedPayments]
   );
   const cafeCashControl = useMemo(
     () => computeCashControl({
@@ -771,13 +844,83 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({ isAllowe
     [cafeTotals, cafeCashDraft]
   );
 
+  // Cafe item-level sales: flatten completed cafe order items for the item ledger view
+  const cafeItemSalesRows = useMemo(() => {
+    type ItemSaleRow = {
+      itemName: string;
+      orderId: string;
+      quantity: number;
+      lineTotal: number;
+      serviceMode: string;
+      paymentChoice: string;
+      completedAt: Date | null;
+    };
+    const rows: ItemSaleRow[] = [];
+    orders.forEach((order) => {
+      if (resolveOrderBusinessDate(order) !== businessDate) return;
+      if (order.status !== 'completed') return;
+      if (order.serviceArea !== 'cafe') return;
+      if (order.accountingTreatment === 'cancelled') return;
+      const completedAt = timestampToDate(order.updatedAt);
+      (order.items || []).forEach((item) => {
+        rows.push({
+          itemName: item.itemName,
+          orderId: order.id || '',
+          quantity: item.quantity,
+          lineTotal: item.lineTotal,
+          serviceMode: order.serviceMode,
+          paymentChoice: order.checkoutPaymentChoice || 'cash',
+          completedAt,
+        });
+      });
+    });
+    return rows;
+  }, [orders, businessDate]);
+
+  const cafeItemSalesFiltered = useMemo(() => {
+    let next = cafeItemSalesRows;
+    const term = cafeItemSearch.trim().toLowerCase();
+    if (term) {
+      next = next.filter((r) => r.itemName.toLowerCase().includes(term) || r.orderId.toLowerCase().includes(term));
+    }
+    if (cafeItemServiceModeFilter !== 'all') {
+      next = next.filter((r) => r.serviceMode === cafeItemServiceModeFilter);
+    }
+    if (cafeItemPaymentFilter !== 'all') {
+      next = next.filter((r) => r.paymentChoice === cafeItemPaymentFilter);
+    }
+    return next;
+  }, [cafeItemSalesRows, cafeItemSearch, cafeItemServiceModeFilter, cafeItemPaymentFilter]);
+
+  const cafeItemSalesSummary = useMemo(() => {
+    const map = new Map<string, { qtySold: number; grossValue: number; orderIds: Set<string> }>();
+    cafeItemSalesFiltered.forEach((row) => {
+      const entry = map.get(row.itemName);
+      if (entry) {
+        entry.qtySold += row.quantity;
+        entry.grossValue += row.lineTotal;
+        entry.orderIds.add(row.orderId);
+      } else {
+        map.set(row.itemName, { qtySold: row.quantity, grossValue: row.lineTotal, orderIds: new Set([row.orderId]) });
+      }
+    });
+    return Array.from(map.entries())
+      .map(([itemName, data]) => ({
+        itemName,
+        qtySold: data.qtySold,
+        grossValue: data.grossValue,
+        orderCount: data.orderIds.size,
+      }))
+      .sort((a, b) => b.grossValue - a.grossValue);
+  }, [cafeItemSalesFiltered]);
+
   useEffect(() => {
     if (!cafeReconciliation) {
       setCafeDraft({
-        cashReceived: 0,
-        mobileMoneyReceived: 0,
-        bankReceived: 0,
-        otherReceived: 0,
+        cashReceived: cafeCapturedPayments.cashReceived,
+        mobileMoneyReceived: cafeCapturedPayments.mobileMoneyReceived,
+        bankReceived: cafeCapturedPayments.bankReceived,
+        otherReceived: cafeCapturedPayments.otherReceived,
         notes: '',
       });
       setCafeCashDraft({
@@ -795,10 +938,10 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({ isAllowe
     }
 
     setCafeDraft({
-      cashReceived: cafeReconciliation.totals.cashReceived || 0,
-      mobileMoneyReceived: cafeReconciliation.totals.mobileMoneyReceived || 0,
-      bankReceived: cafeReconciliation.totals.bankReceived || 0,
-      otherReceived: cafeReconciliation.totals.otherReceived || 0,
+      cashReceived: cafeCapturedPayments.cashReceived,
+      mobileMoneyReceived: cafeCapturedPayments.mobileMoneyReceived,
+      bankReceived: cafeCapturedPayments.bankReceived,
+      otherReceived: cafeCapturedPayments.otherReceived,
       notes: cafeReconciliation.notes || '',
     });
     setCafeCashDraft({
@@ -812,15 +955,15 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({ isAllowe
       receivedBy: cafeReconciliation.cashControl?.receivedBy,
       receivedAt: cafeReconciliation.cashControl?.receivedAt,
     });
-  }, [cafeReconciliation, businessDate]);
+  }, [cafeReconciliation, businessDate, cafeCapturedPayments]);
 
   useEffect(() => {
     if (!reconciliation?.settlement) {
       setBakerySettlementDraft({
-        cashReceived: 0,
-        mobileMoneyReceived: 0,
-        bankReceived: 0,
-        otherReceived: 0,
+        cashReceived: bakeryCapturedPayments.cashReceived,
+        mobileMoneyReceived: bakeryCapturedPayments.mobileMoneyReceived,
+        bankReceived: bakeryCapturedPayments.bankReceived,
+        otherReceived: bakeryCapturedPayments.otherReceived,
       });
       setBakeryCashDraft({
         openingCashFloat: 0,
@@ -836,10 +979,10 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({ isAllowe
       return;
     }
     setBakerySettlementDraft({
-      cashReceived: reconciliation.settlement.cashReceived || 0,
-      mobileMoneyReceived: reconciliation.settlement.mobileMoneyReceived || 0,
-      bankReceived: reconciliation.settlement.bankReceived || 0,
-      otherReceived: reconciliation.settlement.otherReceived || 0,
+      cashReceived: bakeryCapturedPayments.cashReceived,
+      mobileMoneyReceived: bakeryCapturedPayments.mobileMoneyReceived,
+      bankReceived: bakeryCapturedPayments.bankReceived,
+      otherReceived: bakeryCapturedPayments.otherReceived,
     });
     setBakeryCashDraft({
       openingCashFloat: reconciliation.cashControl?.openingCashFloat || 0,
@@ -852,7 +995,7 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({ isAllowe
       receivedBy: reconciliation.cashControl?.receivedBy,
       receivedAt: reconciliation.cashControl?.receivedAt,
     });
-  }, [reconciliation, businessDate]);
+  }, [reconciliation, businessDate, bakeryCapturedPayments]);
 
   const updateDraftField = (sku: string, key: keyof LineDraft, value: string) => {
     setDraftBySku((prev) => {
@@ -953,7 +1096,7 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({ isAllowe
   };
 
   const handleOpenDay = async () => {
-    if (!canEditBakery || busy || isClosed || reconciliation) return;
+    if (!canManageBakeryLifecycle || busy || isClosed || reconciliation) return;
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -970,6 +1113,7 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({ isAllowe
         cashControl: bakeryCashControl,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
+        lastUpdatedAt: serverTimestamp(),
         ...(actor ? { openedBy: actor } : {}),
         ...(actor ? { lastUpdatedBy: actor } : {}),
       }), { merge: true });
@@ -1008,6 +1152,7 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({ isAllowe
         ...(actor && !reconciliation ? { openedBy: actor } : {}),
         ...(reconciliation?.createdAt ? { createdAt: reconciliation.createdAt } : { createdAt: serverTimestamp() }),
         updatedAt: serverTimestamp(),
+        lastUpdatedAt: serverTimestamp(),
         ...(actor ? { lastUpdatedBy: actor } : {}),
       }), { merge: true });
       setNotice('Draft reconciliation saved.');
@@ -1026,7 +1171,7 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({ isAllowe
   };
 
   const handleCloseDay = async () => {
-    if (!canEditBakery || busy || isClosed) return;
+    if (!canManageBakeryLifecycle || busy || isClosed) return;
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -1115,6 +1260,7 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({ isAllowe
         cashControl: { ...bakeryCashControl, handoverStatus: 'closed' },
         ...(reconciliation?.createdAt ? { createdAt: reconciliation.createdAt } : { createdAt: now }),
         updatedAt: now,
+        lastUpdatedAt: now,
         closedAt: now,
         ...(actor ? { lastUpdatedBy: actor } : {}),
         ...(actor ? { closedBy: actor } : {}),
@@ -1139,20 +1285,38 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({ isAllowe
     }
   };
 
-  const updateCafeDraftNumber = (key: keyof Omit<CafeDraft, 'notes'>, raw: string) => {
-    const next = Number(raw);
-    setCafeDraft((prev) => ({
-      ...prev,
-      [key]: Number.isFinite(next) ? Math.max(0, next) : 0,
-    }));
-  };
+  const handleReopenDay = async () => {
+    if (!canManageBakeryLifecycle || busy || !isClosed || !reconciliation) return;
+    const confirmReopen = typeof window === 'undefined'
+      ? false
+      : window.confirm(`Reopen bakery reconciliation for ${businessDateLabel}? This will move status back to open.`);
+    if (!confirmReopen) return;
 
-  const updateBakerySettlementDraftNumber = (key: keyof SettlementDraft, raw: string) => {
-    const next = Number(raw);
-    setBakerySettlementDraft((prev) => ({
-      ...prev,
-      [key]: Number.isFinite(next) ? Math.max(0, next) : 0,
-    }));
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    setWriteSummary(null);
+    try {
+      await setDoc(doc(db, 'bakeryDailyReconciliation', businessDate), sanitizeWritePayload({
+        status: 'open',
+        updatedAt: serverTimestamp(),
+        lastUpdatedAt: serverTimestamp(),
+        ...(actor ? { lastUpdatedBy: actor, reopenedBy: actor } : {}),
+        reopenedAt: serverTimestamp(),
+      }), { merge: true });
+      setNotice(`Reopened bakery reconciliation for ${businessDateLabel}.`);
+      setWriteSummary({
+        reconciliationDocId: businessDate,
+        collection: 'bakeryDailyReconciliation',
+        ledgerEntriesWritten: 0,
+        snapshotsWritten: 0,
+        action: 'save',
+      });
+    } catch (reopenError) {
+      setError(reopenError instanceof Error ? reopenError.message : 'Could not reopen bakery reconciliation day.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const updateCashDraftNumber = (targetMode: ReconciliationMode, key: 'openingCashFloat' | 'actualCountedCash' | 'cashRemoved', raw: string) => {
@@ -1230,7 +1394,13 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({ isAllowe
 
   const saveAccountingTreatment = async (orderId: string, targetMode: ReconciliationMode) => {
     const canEdit = targetMode === 'bakery' ? canEditBakeryAccounting : canEditCafeAccounting;
+    const targetClosed = targetMode === 'bakery' ? isClosed : cafeStatusClosed;
+    const canEditClosed = currentUser?.role === 'admin';
     if (!canEdit || !orderId) return;
+    if (targetClosed && !canEditClosed) {
+      setError('Closed reconciliation is read-only for accountant roles.');
+      return;
+    }
     const draft = orderAccountingDrafts[orderId];
     if (!draft) return;
 
@@ -1266,7 +1436,7 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({ isAllowe
   };
 
   const handleOpenCafeDay = async () => {
-    if (!canEditCafe || busy || cafeStatusClosed || cafeReconciliation) return;
+    if (!canManageCafeLifecycle || busy || cafeStatusClosed || cafeReconciliation) return;
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -1282,6 +1452,7 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({ isAllowe
         includeMixedOrders: false,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
+        lastUpdatedAt: serverTimestamp(),
         ...(actor ? { openedBy: actor } : {}),
         ...(actor ? { lastUpdatedBy: actor } : {}),
       }), { merge: true });
@@ -1317,6 +1488,7 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({ isAllowe
         includeMixedOrders: false,
         ...(cafeReconciliation?.createdAt ? { createdAt: cafeReconciliation.createdAt } : { createdAt: serverTimestamp() }),
         updatedAt: serverTimestamp(),
+        lastUpdatedAt: serverTimestamp(),
         ...(actor && !cafeReconciliation ? { openedBy: actor } : {}),
         ...(actor ? { lastUpdatedBy: actor } : {}),
       }), { merge: true });
@@ -1336,7 +1508,7 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({ isAllowe
   };
 
   const handleCloseCafeDay = async () => {
-    if (!canEditCafe || busy || cafeStatusClosed) return;
+    if (!canManageCafeLifecycle || busy || cafeStatusClosed) return;
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -1375,6 +1547,7 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({ isAllowe
         includeMixedOrders: false,
         ...(cafeReconciliation?.createdAt ? { createdAt: cafeReconciliation.createdAt } : { createdAt: serverTimestamp() }),
         updatedAt: serverTimestamp(),
+        lastUpdatedAt: serverTimestamp(),
         closedAt: serverTimestamp(),
         ...(actor ? { lastUpdatedBy: actor } : {}),
         ...(actor ? { closedBy: actor } : {}),
@@ -1397,6 +1570,40 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({ isAllowe
     }
   };
 
+  const handleReopenCafeDay = async () => {
+    if (!canManageCafeLifecycle || busy || !cafeStatusClosed || !cafeReconciliation) return;
+    const confirmReopen = typeof window === 'undefined'
+      ? false
+      : window.confirm(`Reopen cafe reconciliation for ${businessDateLabel}? This will move status back to open.`);
+    if (!confirmReopen) return;
+
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    setWriteSummary(null);
+    try {
+      await setDoc(doc(db, 'cafeDailyReconciliation', businessDate), sanitizeWritePayload({
+        status: 'open',
+        updatedAt: serverTimestamp(),
+        lastUpdatedAt: serverTimestamp(),
+        ...(actor ? { lastUpdatedBy: actor, reopenedBy: actor } : {}),
+        reopenedAt: serverTimestamp(),
+      }), { merge: true });
+      setNotice(`Reopened cafe reconciliation for ${businessDateLabel}.`);
+      setWriteSummary({
+        reconciliationDocId: businessDate,
+        collection: 'cafeDailyReconciliation',
+        ledgerEntriesWritten: 0,
+        snapshotsWritten: 0,
+        action: 'save',
+      });
+    } catch (reopenError) {
+      setError(reopenError instanceof Error ? reopenError.message : 'Could not reopen cafe reconciliation day.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const activeReconciliation = mode === 'bakery' ? reconciliation : cafeReconciliation;
   const activeAuditRows = mode === 'bakery' ? bakeryDisplayAuditRows : cafeDisplayAuditRows;
   const activeStatusClosed = mode === 'bakery' ? isClosed : cafeStatusClosed;
@@ -1413,6 +1620,7 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({ isAllowe
     return missing;
   }, [activeReconciliation, mode, reconciliation, cafeReconciliation]);
 
+
   const renderAuditActor = (value: { displayName?: string } | undefined, legacyLabel: string): string => {
     if (value?.displayName) return value.displayName;
     if (activeReconciliation) return `${legacyLabel} (legacy record)`;
@@ -1426,9 +1634,14 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({ isAllowe
     const row = rows.find((entry) => entry.orderId === selectedAccountingOrderId) || null;
     if (!row) {
       return (
-        <section className="rounded-2xl border border-[var(--color-border)] bg-white p-4">
-          <h3 className="text-lg font-semibold">Order Treatment Editor</h3>
-          <p className="text-xs text-[var(--color-text-muted)] mt-1">Select an order row and click `Edit Treatment` to classify settlement treatment.</p>
+        <section className="rounded-[20px] border border-dashed border-[var(--color-border)] bg-[var(--color-bg-secondary)]/30 px-5 py-4 flex items-center gap-3">
+          <div className="w-8 h-8 rounded-xl bg-[var(--color-bg-secondary)] flex items-center justify-center shrink-0">
+            <Save className="w-4 h-4 text-[var(--color-text-muted)]" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-[var(--color-text)]">Order Treatment Editor</p>
+            <p className="text-xs text-[var(--color-text-muted)] mt-0.5">Select an order row above and click <strong>Edit</strong> to classify its settlement treatment.</p>
+          </div>
         </section>
       );
     }
@@ -1443,43 +1656,43 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({ isAllowe
       : canEditCafeAccounting && row.serviceArea === 'cafe';
 
     return (
-      <section className="rounded-2xl border border-[var(--color-border)] bg-white p-4 space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
+      <section className="rounded-[24px] border-2 border-[var(--color-primary)] bg-[var(--color-primary)]/5 p-5 space-y-4 animate-in zoom-in-95 duration-300">
+        <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
-            <h3 className="text-lg font-semibold">Order Treatment Editor</h3>
-            <p className="text-xs text-[var(--color-text-muted)]">
-              Editing order <strong>{row.orderId}</strong> ({row.customerName || 'Walk-in'}) - {formatCurrency(row.total)}
+            <h3 className="text-lg font-serif">Treatment Editor</h3>
+            <p className="text-xs font-semibold text-[var(--color-primary)] mt-0.5">
+              Order {row.orderId} · {row.customerName || 'Walk-in'} · {formatCurrency(row.total)}
             </p>
           </div>
           <button
             type="button"
             onClick={() => setSelectedAccountingOrderId(null)}
-            className="rounded border border-[var(--color-border)] px-3 py-1 text-xs font-semibold"
+            className="rounded-full border border-[var(--color-border)] bg-white px-4 py-1.5 text-xs font-bold hover:bg-[var(--color-bg-secondary)] transition-colors"
           >
             Close
           </button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <label className="text-sm">
-            <span className="block text-[var(--color-text-muted)] mb-1">Treatment</span>
+          <label className="space-y-1.5">
+            <span className="block text-xs font-semibold text-[var(--color-text-muted)]">Treatment</span>
             <select
               value={draft.treatment}
               onChange={(event) => updateAccountingDraft(row.orderId, 'treatment', event.target.value)}
               disabled={!canEdit || accountingBusyOrderId === row.orderId}
-              className="w-full rounded border border-[var(--color-border)] px-2 py-2 text-sm disabled:bg-gray-100"
+              className="w-full rounded-[16px] border-2 border-[var(--color-border)] bg-white focus:border-[var(--color-primary)] focus:outline-none px-4 py-3 text-sm font-semibold text-[var(--color-text)] transition-all disabled:opacity-50"
             >
               {ACCOUNTING_TREATMENT_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>
           </label>
-          <label className="text-sm">
-            <span className="block text-[var(--color-text-muted)] mb-1">Reason Code</span>
+          <label className="space-y-1.5">
+            <span className="block text-xs font-semibold text-[var(--color-text-muted)]">Reason Code</span>
             <select
               value={draft.reasonCode}
               onChange={(event) => updateAccountingDraft(row.orderId, 'reasonCode', event.target.value)}
               disabled={!canEdit || accountingBusyOrderId === row.orderId}
-              className="w-full rounded border border-[var(--color-border)] px-2 py-2 text-sm disabled:bg-gray-100"
+              className="w-full rounded-[16px] border-2 border-[var(--color-border)] bg-white focus:border-[var(--color-primary)] focus:outline-none px-4 py-3 text-sm font-semibold text-[var(--color-text)] transition-all disabled:opacity-50"
             >
               <option value="">Select reason code</option>
               {ACCOUNTING_REASON_OPTIONS.map((option) => (
@@ -1487,37 +1700,35 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({ isAllowe
               ))}
             </select>
           </label>
-          <label className="text-sm">
-            <span className="block text-[var(--color-text-muted)] mb-1">Note</span>
+          <label className="space-y-1.5">
+            <span className="block text-xs font-semibold text-[var(--color-text-muted)]">Note</span>
             <input
               value={draft.reasonNote}
               onChange={(event) => updateAccountingDraft(row.orderId, 'reasonNote', event.target.value)}
               placeholder="Required for credit/mixed/cancelled"
               disabled={!canEdit || accountingBusyOrderId === row.orderId}
-              className="w-full rounded border border-[var(--color-border)] px-2 py-2 text-sm disabled:bg-gray-100"
+              className="w-full rounded-[16px] border-2 border-[var(--color-border)] bg-white focus:border-[var(--color-primary)] focus:outline-none px-4 py-3 text-sm font-semibold text-[var(--color-text)] transition-all disabled:opacity-50"
             />
           </label>
         </div>
         {!canEdit && (
-          <p className="text-xs text-[var(--color-text-muted)]">You cannot edit this order from the current mode/role.</p>
+          <p className="text-xs font-semibold text-[var(--color-text-muted)]">You cannot edit this order from the current mode/role.</p>
         )}
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => saveAccountingTreatment(row.orderId, targetMode)}
-            disabled={!canEdit || accountingBusyOrderId === row.orderId}
-            className="rounded-xl bg-[var(--color-primary)] text-white px-4 py-2 text-sm font-semibold disabled:opacity-50"
-          >
-            {accountingBusyOrderId === row.orderId ? 'Saving...' : 'Save Treatment'}
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => saveAccountingTreatment(row.orderId, targetMode)}
+          disabled={!canEdit || accountingBusyOrderId === row.orderId}
+          className="bg-[var(--color-primary)] text-white px-6 py-3 rounded-[20px] text-xs font-black uppercase tracking-[0.2em] shadow-lg shadow-[var(--color-primary)]/10 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {accountingBusyOrderId === row.orderId ? 'Saving...' : 'Save Treatment'}
+        </button>
       </section>
     );
   };
 
   if (!isAllowed) {
     return (
-      <div className="px-4 py-12 space-y-4 text-center">
+      <div className="px-4 py-12 space-y-4 text-center animate-in fade-in duration-500">
         <div className="w-16 h-16 rounded-full bg-[var(--color-primary)]/10 text-[var(--color-primary)] flex items-center justify-center mx-auto">
           <AlertCircle className="w-8 h-8" />
         </div>
@@ -1527,857 +1738,924 @@ export const ReconciliationView: React.FC<ReconciliationViewProps> = ({ isAllowe
     );
   }
 
+  // ── Shared style tokens ──────────────────────────────────────────────────────
+  // Editable input — white bg, visible border, no spinner (via index.css)
+  const inputCls = "w-full rounded-[16px] border-2 border-[var(--color-border)] bg-white focus:border-[var(--color-primary)] focus:outline-none px-4 py-3 text-sm font-semibold text-[var(--color-text)] transition-all placeholder:text-[var(--color-text-muted)]/50 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-[var(--color-bg-secondary)]";
+  // Compact editable cell for table rows
+  const tableInputCls = "w-24 rounded-xl border-2 border-[var(--color-border)] bg-white focus:border-[var(--color-primary)] focus:outline-none px-2 py-1.5 text-sm font-semibold text-[var(--color-text)] transition-all disabled:opacity-50 disabled:bg-[var(--color-bg-secondary)]";
+  // Label above a field
+  const labelCls = "block text-xs font-semibold text-[var(--color-text-muted)] mb-1.5";
+
+  // ── Computed / auto-calculated display field ─────────────────────────────────
+  const renderComputed = (label: string, value: string, highlight?: 'positive' | 'negative') => (
+    <div className="space-y-1.5">
+      <span className={labelCls}>{label}</span>
+      <div className="w-full rounded-[16px] bg-[var(--color-primary)]/8 border border-[var(--color-primary)]/25 px-4 py-3 flex items-center justify-between gap-2">
+        <span className={`text-sm font-bold ${highlight === 'positive' ? 'text-emerald-700' : highlight === 'negative' ? 'text-red-700' : 'text-[var(--color-text)]'}`}>
+          {value}
+        </span>
+        <span className="text-[8px] font-black uppercase tracking-widest text-[var(--color-primary)] bg-white border border-[var(--color-primary)]/30 px-2 py-0.5 rounded-full shrink-0">
+          AUTO
+        </span>
+      </div>
+    </div>
+  );
+
+  // ── KPI card ─────────────────────────────────────────────────────────────────
+  const renderKpiCard = (label: string, value: string, variant?: 'primary' | 'positive' | 'negative') => (
+    <article className={`rounded-[24px] p-5 ${variant === 'primary' ? 'border-2 border-[var(--color-primary)] bg-[var(--color-primary)]/5' : 'border border-[var(--color-border)] bg-white'}`}>
+      <p className="text-xs font-semibold text-[var(--color-text-muted)] leading-tight">{label}</p>
+      <p className={`mt-2 text-2xl font-serif ${variant === 'primary' ? 'text-[var(--color-primary)]' : variant === 'positive' ? 'text-emerald-700' : variant === 'negative' ? 'text-red-700' : 'text-[var(--color-text)]'}`}>
+        {value}
+      </p>
+    </article>
+  );
+
+  // ── Stat chip (read-only summary grid item) ───────────────────────────────────
+  const renderStatChip = (label: string, value: string) => (
+    <div key={label} className="bg-[var(--color-bg-secondary)] rounded-[14px] p-3 border border-[var(--color-border)]">
+      <p className="text-xs font-semibold text-[var(--color-text-muted)] mb-1">{label}</p>
+      <p className="text-sm font-serif font-bold text-[var(--color-text)]">{value}</p>
+    </div>
+  );
+
   return (
-    <div className="px-4 py-6 pb-24 space-y-4">
-      <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+    <div className="px-4 py-6 pb-28 space-y-5 animate-in fade-in duration-500">
+
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      <header className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div>
+          <p className="text-[10px] font-black uppercase tracking-widest text-[var(--color-primary)] mb-1">Daily Operations</p>
           <h2 className="text-3xl font-serif">
-            {mode === 'bakery' ? 'Bakery Daily Reconciliation' : 'Cafe Daily Reconciliation'}
+            {mode === 'bakery' ? 'Bakery Reconciliation' : 'Cafe Reconciliation'}
           </h2>
-          <p className="text-sm text-[var(--color-text-muted)]">
+          <p className="text-xs text-[var(--color-text-muted)] mt-1 max-w-lg">
             {mode === 'bakery'
               ? 'Open day, capture stock movement, and close with variance by bakery SKU.'
               : 'Open day, reconcile completed cafe orders to received payments, and close with order-to-cash variance.'}
           </p>
-          <p className="text-xs text-[var(--color-text-muted)] mt-1">
-            Role mode: {mode === 'bakery'
-              ? (canEditBakery ? 'Editable' : 'View only (admin/bakery accountant required for updates)')
-              : (canEditCafe ? 'Editable' : 'View only (admin/cafe accountant required for updates)')}
+          <p className="text-xs font-semibold text-[var(--color-text-muted)]/70 mt-1">
+            Role mode: {mode === 'bakery' ? (canEditBakery ? 'Editable' : 'View only') : (canEditCafe ? 'Editable' : 'View only')}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <label className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]" htmlFor="business-date">Business Date</label>
+        <div className="flex items-center gap-2 bg-[var(--color-bg-secondary)] rounded-[20px] border border-[var(--color-border)] px-5 py-3 self-start shrink-0">
+          <label className="text-xs font-semibold text-[var(--color-text-muted)] whitespace-nowrap" htmlFor="business-date">
+            Business Date
+          </label>
           <input
             id="business-date"
             type="date"
             value={businessDate}
             onChange={(event) => setBusinessDate(parseBusinessDateInput(event.target.value, businessDate))}
-            className="rounded-xl border border-[var(--color-border)] bg-white px-3 py-2 text-sm"
+            className="bg-transparent outline-none text-sm font-black text-[var(--color-text)]"
           />
-          <span className="text-xs font-semibold text-[var(--color-text-muted)]">{businessDateLabel}</span>
+          <span className="text-xs font-black text-[var(--color-primary)] whitespace-nowrap">{businessDateLabel}</span>
         </div>
       </header>
 
-      <section className="rounded-2xl border border-[var(--color-border)] bg-white p-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div className="inline-flex gap-2">
-          <button
-            type="button"
-            onClick={() => setMode('bakery')}
-            disabled={!availableModes.includes('bakery')}
-            className={`rounded-xl px-3 py-2 text-sm font-semibold ${
-              mode === 'bakery'
-                ? 'bg-[var(--color-primary)] text-white'
-                : 'border border-[var(--color-border)] bg-white text-[var(--color-text)]'
-            } disabled:opacity-50`}
-          >
-            Bakery Mode
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('cafe')}
-            disabled={!availableModes.includes('cafe')}
-            className={`rounded-xl px-3 py-2 text-sm font-semibold ${
-              mode === 'cafe'
-                ? 'bg-[var(--color-primary)] text-white'
-                : 'border border-[var(--color-border)] bg-white text-[var(--color-text)]'
-            } disabled:opacity-50`}
-          >
-            Cafe Mode
-          </button>
+      {/* ── Mode tab nav ───────────────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-3">
+        <nav className="flex gap-1 rounded-[20px] border border-[var(--color-border)] bg-[var(--color-bg-secondary)]/40 p-1">
+          {(['bakery', 'cafe'] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setMode(m)}
+              disabled={!availableModes.includes(m)}
+              className={`rounded-[16px] px-6 py-2.5 text-xs font-black uppercase tracking-wider transition-all disabled:opacity-40 ${
+                mode === m
+                  ? 'bg-[var(--color-primary)] text-white shadow-sm'
+                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+              }`}
+            >
+              {m === 'bakery' ? 'Bakery Mode' : 'Cafe Mode'}
+            </button>
+          ))}
+        </nav>
+        <div className={`inline-flex items-center gap-2 rounded-[16px] border px-4 py-2 text-xs font-bold ${
+          activeStatusClosed
+            ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+            : 'border-amber-300 bg-amber-50 text-amber-700'
+        }`}>
+          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${activeStatusClosed ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+          {activeReconciliation?.status ?? 'not_opened'}
         </div>
-        <div className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)] space-x-3">
-          <span>Active Mode: <span className="text-[var(--color-text)]">{mode === 'bakery' ? 'Bakery' : 'Cafe'}</span></span>
-          <span>Status: <span className="text-[var(--color-text)]">{activeReconciliation?.status || 'not_opened'}</span></span>
-        </div>
-      </section>
+      </div>
 
+      {/* ── Inline feedback ────────────────────────────────────────────────── */}
       {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</div>
+        <div className="rounded-[20px] border border-red-200 bg-red-50 px-5 py-3 text-sm text-red-700 flex items-start gap-3">
+          <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+          <span>{error}</span>
+        </div>
       )}
       {notice && (
-        <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-700">{notice}</div>
+        <div className="rounded-[20px] border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm text-emerald-700">{notice}</div>
       )}
       {writeSummary && (
-        <div className="rounded-xl border border-[var(--color-border)] bg-white px-4 py-2 text-xs text-[var(--color-text-muted)]">
+        <div className="rounded-[20px] border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-5 py-3 text-xs text-[var(--color-text-muted)]">
           <strong className="text-[var(--color-text)] uppercase tracking-wide mr-2">{writeSummary.action}</strong>
-          wrote <code>{writeSummary.collection}/{writeSummary.reconciliationDocId}</code>,
-          ledger entries: <strong>{writeSummary.ledgerEntriesWritten}</strong>,
-          snapshots: <strong>{writeSummary.snapshotsWritten}</strong>.
+          wrote <code>{writeSummary.collection}/{writeSummary.reconciliationDocId}</code> · ledger entries: <strong>{writeSummary.ledgerEntriesWritten}</strong> · snapshots: <strong>{writeSummary.snapshotsWritten}</strong>
         </div>
       )}
+
+      {/* ── Day-close guard ────────────────────────────────────────────────── */}
       {(unresolvedOrdersForBusinessDate.length > 0 || staleOpenOrders.length > 0) && (
-        <section className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 space-y-1">
+        <section className="rounded-[20px] border-2 border-amber-300 bg-amber-50 px-5 py-4 space-y-1.5">
           {unresolvedOrdersForBusinessDate.length > 0 && (
-            <p>
-              Day-close guard: <strong>{unresolvedOrdersForBusinessDate.length}</strong> active order(s) exist for {businessDateLabel}.
-              Close Day will block unless you confirm forced resolution.
-            </p>
+            <p className="text-sm text-amber-900"><span className="font-black">Day-close guard:</span> {unresolvedOrdersForBusinessDate.length} active order(s) exist for {businessDateLabel}. Close Day will block unless you confirm forced resolution.</p>
           )}
           {staleOpenOrders.length > 0 && (
-            <p>
-              Stale recovery pending: <strong>{staleOpenOrders.length}</strong> unresolved order(s) from previous business dates will be auto-resolved on close.
-            </p>
+            <p className="text-sm text-amber-900"><span className="font-black">Stale recovery pending:</span> {staleOpenOrders.length} unresolved order(s) from previous business dates will be auto-resolved on close.</p>
           )}
         </section>
       )}
 
-      <section className={`rounded-2xl border px-4 py-3 text-sm ${
+      {/* ── Open / closed status banner ───────────────────────────────────── */}
+      <section className={`rounded-[20px] border px-5 py-3.5 text-sm font-medium flex items-center gap-2 ${
         activeStatusClosed
-          ? 'border-emerald-300 bg-emerald-50 text-emerald-900'
-          : 'border-amber-300 bg-amber-50 text-amber-900'
+          ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+          : 'border-amber-300 bg-amber-50 text-amber-800'
       }`}>
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${activeStatusClosed ? 'bg-emerald-500' : 'bg-amber-500'}`} />
         {activeStatusClosed
           ? 'Finalized reconciliation: this business date is read-only and closed.'
           : 'Active reconciliation: this business date is open for updates until you close the day.'}
       </section>
 
       {activeReconciliation && legacyMissingFields.length > 0 && (
-        <section className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          Legacy record compatibility: missing historical fields `{legacyMissingFields.join(', ')}` are shown as not available.
+        <section className="rounded-[20px] border border-amber-300 bg-amber-50 px-5 py-3 text-xs text-amber-900">
+          Legacy record compatibility: missing fields <code className="font-mono">{legacyMissingFields.join(', ')}</code> are shown as not available.
         </section>
       )}
 
-      <section className="rounded-2xl border border-[var(--color-border)] bg-white p-4">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--color-text-muted)] mb-2">Audit Trail</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-          <div>
-            <p className="text-[var(--color-text-muted)]">Opened By</p>
-            <p className="font-semibold">{renderAuditActor(activeReconciliation?.openedBy, 'Not available')}</p>
-          </div>
-          <div>
-            <p className="text-[var(--color-text-muted)]">Last Updated By</p>
-            <p className="font-semibold">{renderAuditActor(activeReconciliation?.lastUpdatedBy, 'Not available')}</p>
-          </div>
-          <div>
-            <p className="text-[var(--color-text-muted)]">Last Updated At</p>
-            <p className="font-semibold">{activeReconciliation?.updatedAt ? formatDateTime(activeReconciliation.updatedAt) : (activeReconciliation ? 'Not available (legacy record)' : '—')}</p>
-          </div>
-          <div>
-            <p className="text-[var(--color-text-muted)]">Closed By</p>
-            <p className="font-semibold">{renderAuditActor(activeReconciliation?.closedBy, 'Not available')}</p>
-          </div>
-          <div>
-            <p className="text-[var(--color-text-muted)]">Closed At</p>
-            <p className="font-semibold">{activeReconciliation?.closedAt ? formatDateTime(activeReconciliation.closedAt) : (activeStatusClosed ? 'Not available (legacy record)' : '—')}</p>
-          </div>
+      {/* ── Audit Trail ───────────────────────────────────────────────────── */}
+      <section className="rounded-[24px] border border-[var(--color-border)] bg-white p-5">
+        <p className="text-xs font-black uppercase tracking-widest text-[var(--color-text-muted)] mb-4">Audit Trail</p>
+        <div className="grid grid-cols-2 md:grid-cols-7 gap-4">
+          {[
+            { label: 'Opened By',       value: renderAuditActor(activeReconciliation?.openedBy, 'Not available') },
+            { label: 'Last Updated By', value: renderAuditActor(activeReconciliation?.lastUpdatedBy, 'Not available') },
+            { label: 'Last Updated At', value: activeReconciliation?.lastUpdatedAt ? formatDateTime(activeReconciliation.lastUpdatedAt) : activeReconciliation?.updatedAt ? formatDateTime(activeReconciliation.updatedAt) : (activeReconciliation ? 'Not available (legacy)' : '—') },
+            { label: 'Closed By',       value: renderAuditActor(activeReconciliation?.closedBy, 'Not available') },
+            { label: 'Closed At',       value: activeReconciliation?.closedAt ? formatDateTime(activeReconciliation.closedAt) : (activeStatusClosed ? 'Not available (legacy)' : '—') },
+            { label: 'Reopened By',     value: renderAuditActor(activeReconciliation?.reopenedBy, activeReconciliation ? 'Not reopened' : '—') },
+            { label: 'Reopened At',     value: activeReconciliation?.reopenedAt ? formatDateTime(activeReconciliation.reopenedAt) : (activeReconciliation ? '—' : '—') },
+          ].map(({ label, value }) => (
+            <div key={label}>
+              <p className="text-xs font-semibold text-[var(--color-text-muted)] mb-1">{label}</p>
+              <p className="text-sm font-bold text-[var(--color-text)] leading-snug">{value}</p>
+            </div>
+          ))}
         </div>
       </section>
 
+      {/* ══════════════════════════════════════════════════════════════════════
+          BAKERY MODE
+      ══════════════════════════════════════════════════════════════════════ */}
       {mode === 'bakery' ? (
         <>
-          <section className="rounded-2xl border border-[var(--color-border)] bg-white p-4">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-              <div><p className="text-[var(--color-text-muted)]">Status</p><p className="font-semibold">{reconciliation?.status || 'not_opened'}</p></div>
-              <div><p className="text-[var(--color-text-muted)]">SKU Count</p><p className="font-semibold">{workingLines.length}</p></div>
-              <div><p className="text-[var(--color-text-muted)]">Last Updated</p><p className="font-semibold">{reconciliation ? formatDateTime(reconciliation.updatedAt) : 'Not yet'}</p></div>
-              <div><p className="text-[var(--color-text-muted)]">Closed At</p><p className="font-semibold">{reconciliation?.closedAt ? formatDateTime(reconciliation.closedAt) : 'Open'}</p></div>
+          {/* Status strip */}
+          <section className="rounded-[24px] border border-[var(--color-border)] bg-white px-5 py-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {[
+                { label: 'Status',       value: reconciliation?.status ?? 'not_opened' },
+                { label: 'SKU Count',    value: String(workingLines.length) },
+                { label: 'Last Updated', value: reconciliation ? formatDateTime(reconciliation.updatedAt) : 'Not yet' },
+                { label: 'Closed At',    value: reconciliation?.closedAt ? formatDateTime(reconciliation.closedAt) : 'Open' },
+              ].map(({ label, value }) => (
+                <div key={label}>
+                  <p className="text-xs font-semibold text-[var(--color-text-muted)] mb-1">{label}</p>
+                  <p className="text-sm font-bold text-[var(--color-text)]">{value}</p>
+                </div>
+              ))}
             </div>
           </section>
 
-          <section className="grid grid-cols-2 xl:grid-cols-6 gap-3">
-            <article className="rounded-2xl border border-[var(--color-border)] bg-white p-4">
-              <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Collectible Expected Cash</p>
-              <p className="mt-1 text-2xl font-semibold">{formatCurrency(bakerySettlementTotals.collectibleExpectedCash)}</p>
-            </article>
-            <article className="rounded-2xl border border-[var(--color-border)] bg-white p-4">
-              <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Total Received</p>
-              <p className="mt-1 text-2xl font-semibold">{formatCurrency(bakerySettlementTotals.totalReceived)}</p>
-            </article>
-            <article className="rounded-2xl border border-[var(--color-border)] bg-white p-4">
-              <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Variance</p>
-              <p className={`mt-1 text-2xl font-semibold ${bakerySettlementTotals.variance === 0 ? '' : bakerySettlementTotals.variance > 0 ? 'text-green-700' : 'text-red-700'}`}>
-                {formatCurrency(bakerySettlementTotals.variance)}
-              </p>
-            </article>
-            <article className="rounded-2xl border border-[var(--color-border)] bg-white p-4">
-              <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Gross Completed Sales</p>
-              <p className="mt-1 text-2xl font-semibold">{formatCurrency(bakerySettlementTotals.grossCompletedSales)}</p>
-            </article>
-            <article className="rounded-2xl border border-[var(--color-border)] bg-white p-4">
-              <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Credit Outstanding</p>
-              <p className="mt-1 text-2xl font-semibold">{formatCurrency(bakerySettlementTotals.creditValue)}</p>
-            </article>
-            <article className="rounded-2xl border border-[var(--color-border)] bg-white p-4">
-              <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Complimentary Value</p>
-              <p className="mt-1 text-2xl font-semibold">{formatCurrency(bakerySettlementTotals.complimentaryValue)}</p>
-            </article>
+          {/* KPIs */}
+          <section className="grid grid-cols-2 xl:grid-cols-3 gap-3">
+            {renderKpiCard('Collectible Expected Cash', formatCurrency(bakerySettlementTotals.collectibleExpectedCash), 'primary')}
+            {renderKpiCard('Total Received', formatCurrency(bakerySettlementTotals.totalReceived))}
+            {renderKpiCard('Variance', formatCurrency(bakerySettlementTotals.variance),
+              bakerySettlementTotals.variance === 0 ? undefined : bakerySettlementTotals.variance > 0 ? 'positive' : 'negative')}
+            {renderKpiCard('Gross Completed Sales', formatCurrency(bakerySettlementTotals.grossCompletedSales))}
+            {renderKpiCard('Credit Outstanding', formatCurrency(bakerySettlementTotals.creditValue))}
+            {renderKpiCard('Complimentary Value', formatCurrency(bakerySettlementTotals.complimentaryValue))}
           </section>
 
+          {/* Receipts + Settlement 2-col */}
           <section className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            <article className="rounded-2xl border border-[var(--color-border)] bg-white p-4 space-y-4">
-              <header>
-                <h3 className="text-lg font-semibold">Bakery Actual Receipts</h3>
-                <p className="text-xs text-[var(--color-text-muted)]">Capture receipts to compare against collectible expected cash.</p>
-              </header>
+
+            {/* Actual Receipts — editable inputs */}
+            <article className="rounded-[24px] border border-[var(--color-border)] bg-white p-6 space-y-5">
+              <div className="pb-4 border-b border-[var(--color-border)]">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <h3 className="text-xl font-serif">Actual Receipts</h3>
+                  <span className="text-[9px] font-black uppercase tracking-widest bg-[var(--color-text)] text-white px-2 py-0.5 rounded-full">Enter values</span>
+                </div>
+                <p className="text-xs font-semibold text-[var(--color-text-muted)]">Auto-captured from completed bakery orders with recorded payments</p>
+              </div>
               {reconciliation && !reconciliation.cashControl && (
-                <p className="text-xs text-amber-700">Legacy record: cash-control fields were not captured on this historical day.</p>
+                <p className="text-xs text-amber-700 bg-amber-50 rounded-[12px] px-3 py-2">Legacy record: cash-control fields were not captured on this historical day.</p>
               )}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <label className="text-sm">
-                  <span className="block text-[var(--color-text-muted)] mb-1">Cash Received</span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={bakerySettlementDraft.cashReceived}
-                    onChange={(event) => updateBakerySettlementDraftNumber('cashReceived', event.target.value)}
-                    disabled={!canEditBakery || isClosed}
-                    className="w-full rounded-lg border border-[var(--color-border)] px-3 py-2 disabled:bg-gray-100"
-                  />
-                </label>
-                <label className="text-sm">
-                  <span className="block text-[var(--color-text-muted)] mb-1">Mobile Money</span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={bakerySettlementDraft.mobileMoneyReceived}
-                    onChange={(event) => updateBakerySettlementDraftNumber('mobileMoneyReceived', event.target.value)}
-                    disabled={!canEditBakery || isClosed}
-                    className="w-full rounded-lg border border-[var(--color-border)] px-3 py-2 disabled:bg-gray-100"
-                  />
-                </label>
-                <label className="text-sm">
-                  <span className="block text-[var(--color-text-muted)] mb-1">Bank / Transfer</span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={bakerySettlementDraft.bankReceived}
-                    onChange={(event) => updateBakerySettlementDraftNumber('bankReceived', event.target.value)}
-                    disabled={!canEditBakery || isClosed}
-                    className="w-full rounded-lg border border-[var(--color-border)] px-3 py-2 disabled:bg-gray-100"
-                  />
-                </label>
-                <label className="text-sm">
-                  <span className="block text-[var(--color-text-muted)] mb-1">Other</span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={bakerySettlementDraft.otherReceived}
-                    onChange={(event) => updateBakerySettlementDraftNumber('otherReceived', event.target.value)}
-                    disabled={!canEditBakery || isClosed}
-                    className="w-full rounded-lg border border-[var(--color-border)] px-3 py-2 disabled:bg-gray-100"
-                  />
-                </label>
-                <label className="text-sm">
-                  <span className="block text-[var(--color-text-muted)] mb-1">Opening Cash Float</span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={bakeryCashDraft.openingCashFloat}
-                    onChange={(event) => updateCashDraftNumber('bakery', 'openingCashFloat', event.target.value)}
-                    disabled={!canEditBakery || isClosed}
-                    className="w-full rounded-lg border border-[var(--color-border)] px-3 py-2 disabled:bg-gray-100"
-                  />
-                </label>
-                <label className="text-sm">
-                  <span className="block text-[var(--color-text-muted)] mb-1">Cash Removed</span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={bakeryCashDraft.cashRemoved}
-                    onChange={(event) => updateCashDraftNumber('bakery', 'cashRemoved', event.target.value)}
-                    disabled={!canEditBakery || isClosed}
-                    className="w-full rounded-lg border border-[var(--color-border)] px-3 py-2 disabled:bg-gray-100"
-                  />
-                </label>
-                <label className="text-sm">
-                  <span className="block text-[var(--color-text-muted)] mb-1">Actual Counted Cash</span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={bakeryCashDraft.actualCountedCash}
-                    onChange={(event) => updateCashDraftNumber('bakery', 'actualCountedCash', event.target.value)}
-                    disabled={!canEditBakery || isClosed}
-                    className="w-full rounded-lg border border-[var(--color-border)] px-3 py-2 disabled:bg-gray-100"
-                  />
-                </label>
+
+              {/* Payment method inputs */}
+              <div>
+                <p className="text-xs font-black uppercase tracking-widest text-[var(--color-text-muted)] mb-3">Payment Methods Received</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <label className="space-y-1.5">
+                    <span className={labelCls}>Cash Received</span>
+                    <input type="number" min={0} value={bakerySettlementDraft.cashReceived} readOnly disabled className={inputCls} />
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className={labelCls}>Mobile Money</span>
+                    <input type="number" min={0} value={bakerySettlementDraft.mobileMoneyReceived} readOnly disabled className={inputCls} />
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className={labelCls}>Bank / Transfer</span>
+                    <input type="number" min={0} value={bakerySettlementDraft.bankReceived} readOnly disabled className={inputCls} />
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className={labelCls}>Other</span>
+                    <input type="number" min={0} value={bakerySettlementDraft.otherReceived} readOnly disabled className={inputCls} />
+                  </label>
+                </div>
               </div>
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div><p className="text-[var(--color-text-muted)]">Expected Drawer Cash</p><p className="font-semibold">{formatCurrency(bakeryCashControl.expectedDrawerCash)}</p></div>
-                <div><p className="text-[var(--color-text-muted)]">Cash Over/Short</p><p className={`font-semibold ${bakeryCashControl.cashOverShort === 0 ? '' : bakeryCashControl.cashOverShort > 0 ? 'text-green-700' : 'text-red-700'}`}>{formatCurrency(bakeryCashControl.cashOverShort)}</p></div>
+
+              {/* Cash control inputs */}
+              <div>
+                <p className="text-xs font-black uppercase tracking-widest text-[var(--color-text-muted)] mb-3">Cash Control</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <label className="space-y-1.5">
+                    <span className={labelCls}>Opening Cash Float</span>
+                    <input type="number" min={0} value={bakeryCashDraft.openingCashFloat} onChange={(e) => updateCashDraftNumber('bakery', 'openingCashFloat', e.target.value)} disabled={!canEditBakery || isClosed} className={inputCls} />
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className={labelCls}>Cash Removed</span>
+                    <input type="number" min={0} value={bakeryCashDraft.cashRemoved} onChange={(e) => updateCashDraftNumber('bakery', 'cashRemoved', e.target.value)} disabled={!canEditBakery || isClosed} className={inputCls} />
+                  </label>
+                  <label className="space-y-1.5 md:col-span-2">
+                    <span className={labelCls}>Actual Counted Cash</span>
+                    <input type="number" min={0} value={bakeryCashDraft.actualCountedCash} onChange={(e) => updateCashDraftNumber('bakery', 'actualCountedCash', e.target.value)} disabled={!canEditBakery || isClosed} className={inputCls} />
+                  </label>
+                </div>
               </div>
-              <label className="text-sm block">
-                <span className="block text-[var(--color-text-muted)] mb-1">Handover Notes</span>
-                <textarea
-                  rows={2}
-                  value={bakeryCashDraft.handoverNotes}
-                  onChange={(event) => updateCashDraftText('bakery', event.target.value)}
-                  disabled={!canEditBakery || isClosed}
-                  className="w-full rounded-lg border border-[var(--color-border)] px-3 py-2 disabled:bg-gray-100"
-                />
+
+              {/* Auto-calculated outputs — clearly distinct */}
+              <div>
+                <p className="text-xs font-black uppercase tracking-widest text-[var(--color-text-muted)] mb-3">Calculated Results</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {renderComputed('Expected Drawer Cash', formatCurrency(bakeryCashControl.expectedDrawerCash))}
+                  {renderComputed('Cash Over / Short', formatCurrency(bakeryCashControl.cashOverShort),
+                    bakeryCashControl.cashOverShort > 0 ? 'positive' : bakeryCashControl.cashOverShort < 0 ? 'negative' : undefined)}
+                </div>
+              </div>
+
+              <label className="space-y-1.5 block">
+                <span className={labelCls}>Handover Notes</span>
+                <textarea rows={2} value={bakeryCashDraft.handoverNotes} onChange={(e) => updateCashDraftText('bakery', e.target.value)} disabled={!canEditBakery || isClosed} className={`${inputCls} resize-none`} />
               </label>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => updateHandoverStatusDraft('bakery', 'handed_over')}
-                  disabled={!canEditBakery || isClosed}
-                  className="rounded border border-[var(--color-border)] px-3 py-1 text-xs font-semibold disabled:opacity-50"
-                >
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={() => updateHandoverStatusDraft('bakery', 'handed_over')} disabled={!canEditBakery || isClosed} className="rounded-full border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-4 py-2 text-xs font-bold disabled:opacity-50 hover:bg-[var(--color-border)] transition-colors">
                   Mark Handed Over
                 </button>
-                <button
-                  type="button"
-                  onClick={() => updateHandoverStatusDraft('bakery', 'received')}
-                  disabled={!canEditBakery || isClosed}
-                  className="rounded border border-[var(--color-border)] px-3 py-1 text-xs font-semibold disabled:opacity-50"
-                >
+                <button type="button" onClick={() => updateHandoverStatusDraft('bakery', 'received')} disabled={!canEditBakery || isClosed} className="rounded-full border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-4 py-2 text-xs font-bold disabled:opacity-50 hover:bg-[var(--color-border)] transition-colors">
                   Mark Received
                 </button>
-                <p className="text-xs text-[var(--color-text-muted)] self-center">Handover Status: <strong>{bakeryCashDraft.handoverStatus}</strong></p>
+                <span className="text-xs font-semibold text-[var(--color-text-muted)]">
+                  Status: <strong className="text-[var(--color-text)]">{bakeryCashDraft.handoverStatus}</strong>
+                </span>
               </div>
             </article>
 
-            <article className="rounded-2xl border border-[var(--color-border)] bg-white p-4">
-              <header className="mb-3">
-                <h3 className="text-lg font-semibold">Settlement Treatment Summary</h3>
-                <p className="text-xs text-[var(--color-text-muted)]">Classify completed bakery orders as paid, complimentary, credit, or mixed review.</p>
-              </header>
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div><p className="text-[var(--color-text-muted)]">Complimentary Value</p><p className="font-semibold">{formatCurrency(bakerySettlementTotals.complimentaryValue)}</p></div>
-                <div><p className="text-[var(--color-text-muted)]">Credit Outstanding</p><p className="font-semibold">{formatCurrency(bakerySettlementTotals.creditValue)}</p></div>
-                <div><p className="text-[var(--color-text-muted)]">Mixed Review Value</p><p className="font-semibold">{formatCurrency(bakerySettlementTotals.mixedReviewValue)}</p></div>
-                <div><p className="text-[var(--color-text-muted)]">Collectible Expected Cash</p><p className="font-semibold">{formatCurrency(bakerySettlementTotals.collectibleExpectedCash)}</p></div>
-                <div><p className="text-[var(--color-text-muted)]">Completed Orders</p><p className="font-semibold">{bakeryOrderSummary.completedOrders}</p></div>
-                <div><p className="text-[var(--color-text-muted)]">Pending Orders</p><p className="font-semibold">{bakeryOrderSummary.pendingOrders}</p></div>
+            {/* Settlement Summary — all read-only */}
+            <article className="rounded-[24px] border border-[var(--color-border)] bg-white p-6 space-y-5">
+              <div className="pb-4 border-b border-[var(--color-border)]">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <h3 className="text-xl font-serif">Settlement Summary</h3>
+                  <span className="text-[9px] font-black uppercase tracking-widest bg-[var(--color-primary)]/10 text-[var(--color-primary)] px-2 py-0.5 rounded-full">Read-only</span>
+                </div>
+                <p className="text-xs font-semibold text-[var(--color-text-muted)]">Classify completed orders as paid, comp, credit, or mixed</p>
               </div>
-              <div className="grid grid-cols-2 gap-3 text-sm mt-3">
-                <div><p className="text-[var(--color-text-muted)]">Handed Over By</p><p className="font-semibold">{bakeryCashDraft.handedOverBy?.displayName || '—'}</p></div>
-                <div><p className="text-[var(--color-text-muted)]">Handed Over At</p><p className="font-semibold">{bakeryCashDraft.handedOverAt ? formatDateTime(bakeryCashDraft.handedOverAt) : '—'}</p></div>
-                <div><p className="text-[var(--color-text-muted)]">Received By</p><p className="font-semibold">{bakeryCashDraft.receivedBy?.displayName || '—'}</p></div>
-                <div><p className="text-[var(--color-text-muted)]">Received At</p><p className="font-semibold">{bakeryCashDraft.receivedAt ? formatDateTime(bakeryCashDraft.receivedAt) : '—'}</p></div>
+              <div className="grid grid-cols-2 gap-3">
+                {renderStatChip('Complimentary Value', formatCurrency(bakerySettlementTotals.complimentaryValue))}
+                {renderStatChip('Credit Outstanding', formatCurrency(bakerySettlementTotals.creditValue))}
+                {renderStatChip('Mixed Review Value', formatCurrency(bakerySettlementTotals.mixedReviewValue))}
+                {renderStatChip('Collectible Cash', formatCurrency(bakerySettlementTotals.collectibleExpectedCash))}
+                {renderStatChip('Completed Orders', String(bakeryOrderSummary.completedOrders))}
+                {renderStatChip('Pending Orders', String(bakeryOrderSummary.pendingOrders))}
+              </div>
+              <div className="border-t border-[var(--color-border)] pt-4 space-y-3">
+                <p className="text-xs font-black uppercase tracking-widest text-[var(--color-text-muted)]">Handover Record</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { label: 'Handed Over By', value: bakeryCashDraft.handedOverBy?.displayName || '—' },
+                    { label: 'Handed Over At', value: bakeryCashDraft.handedOverAt ? formatDateTime(bakeryCashDraft.handedOverAt) : '—' },
+                    { label: 'Received By',    value: bakeryCashDraft.receivedBy?.displayName || '—' },
+                    { label: 'Received At',    value: bakeryCashDraft.receivedAt ? formatDateTime(bakeryCashDraft.receivedAt) : '—' },
+                  ].map(({ label, value }) => (
+                    <div key={label}>
+                      <p className="text-xs font-semibold text-[var(--color-text-muted)] mb-0.5">{label}</p>
+                      <p className="text-sm font-bold text-[var(--color-text)]">{value}</p>
+                    </div>
+                  ))}
+                </div>
               </div>
             </article>
           </section>
 
-          <section className="rounded-2xl border border-[var(--color-border)] bg-white p-4 space-y-2">
-            <h3 className="text-lg font-semibold">Bakery Non-Collectible / Exclusions</h3>
-            <p className="text-xs text-[var(--color-text-muted)]">
-              Mixed bakery+cafe orders are excluded from bakery reconciliation until split allocation is implemented.
-            </p>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-              <div><p className="text-[var(--color-text-muted)]">Mixed Unresolved</p><p className="font-semibold">{bakeryOrderSummary.excludedMixedOrders}</p></div>
-              <div><p className="text-[var(--color-text-muted)]">Pending Excluded</p><p className="font-semibold">{bakeryOrderSummary.excludedPendingOrders}</p></div>
-              <div><p className="text-[var(--color-text-muted)]">Cancelled Excluded</p><p className="font-semibold">{bakeryOrderSummary.excludedCancelledOrders}</p></div>
-              <div><p className="text-[var(--color-text-muted)]">Completed Orders</p><p className="font-semibold">{bakeryOrderSummary.completedOrders}</p></div>
+          {/* Exclusions */}
+          <section className="rounded-[24px] border border-[var(--color-border)] bg-white p-5 space-y-4">
+            <div>
+              <h3 className="text-lg font-serif">Non-Collectible / Exclusions</h3>
+              <p className="text-xs font-semibold text-[var(--color-text-muted)] mt-0.5">Mixed bakery+cafe orders excluded until split allocation is implemented</p>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {renderStatChip('Mixed Unresolved',   String(bakeryOrderSummary.excludedMixedOrders))}
+              {renderStatChip('Pending Excluded',   String(bakeryOrderSummary.excludedPendingOrders))}
+              {renderStatChip('Cancelled Excluded', String(bakeryOrderSummary.excludedCancelledOrders))}
+              {renderStatChip('Completed Orders',   String(bakeryOrderSummary.completedOrders))}
             </div>
           </section>
 
-          <section className="rounded-2xl border border-[var(--color-border)] bg-white overflow-hidden">
-            <header className="px-4 py-3 border-b border-[var(--color-border)]">
-              <h3 className="text-lg font-semibold">Bakery Order Accounting Audit</h3>
-              <p className="text-xs text-[var(--color-text-muted)]">Update treatment/reason to control collectible cash logic for bakery orders.</p>
-            </header>
+          {/* Bakery Order Accounting Audit — collapsible */}
+          <details className="group rounded-[24px] border border-[var(--color-border)] bg-white overflow-hidden">
+            <summary className="px-5 py-4 border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]/40 cursor-pointer list-none flex items-center justify-between hover:bg-[var(--color-bg-secondary)] transition-colors">
+              <div>
+                <h3 className="text-lg font-serif">Order Accounting Audit</h3>
+                <p className="text-xs font-semibold text-[var(--color-text-muted)] mt-0.5">Update treatment/reason to control collectible cash logic for bakery orders</p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-xs font-bold text-[var(--color-text-muted)] bg-[var(--color-border)] px-2.5 py-1 rounded-full">{bakeryDisplayAuditRows.length} orders</span>
+                <ChevronDown className="w-4 h-4 text-[var(--color-text-muted)] group-open:rotate-180 transition-transform duration-200" />
+              </div>
+            </summary>
             <div className="overflow-x-auto">
               <table className="min-w-[1250px] w-full text-sm">
                 <thead className="bg-[var(--color-bg-secondary)] text-left">
                   <tr>
-                    <th className="px-3 py-2">Order ID</th>
-                    <th className="px-3 py-2">Date/Time</th>
-                    <th className="px-3 py-2">Customer</th>
-                    <th className="px-3 py-2">Service Area</th>
-                    <th className="px-3 py-2">Service Mode</th>
-                    <th className="px-3 py-2">Status</th>
-                    <th className="px-3 py-2">Total</th>
-                    <th className="px-3 py-2">Treatment</th>
-                    <th className="px-3 py-2">Collectible?</th>
-                    <th className="px-3 py-2">Action</th>
-                    <th className="px-3 py-2">Exclusion Reason</th>
+                    {['Order ID','Date/Time','Customer','Service Area','Service Mode','Status','Total','Treatment','Collectible?','Action','Exclusion Reason'].map(col => (
+                      <th key={col} className="px-3 py-3 text-xs font-semibold text-[var(--color-text-muted)] whitespace-nowrap">{col}</th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
                   {bakeryDisplayAuditRows.length === 0 && (
-                    <tr><td colSpan={10} className="px-3 py-6 text-center text-[var(--color-text-muted)]">No bakery-mode orders found for this date.</td></tr>
+                    <tr><td colSpan={11} className="px-3 py-8 text-center text-[var(--color-text-muted)] italic text-sm">No bakery-mode orders found for this date.</td></tr>
                   )}
                   {bakeryDisplayAuditRows.map((row) => (
-                    <tr key={`bakery-${row.orderId}`} className="border-t border-[var(--color-border)]">
-                      <td className="px-3 py-2 font-medium">{row.orderId}</td>
-                      <td className="px-3 py-2">{row.date ? formatDateTime(row.date) : 'Unknown'}</td>
-                      <td className="px-3 py-2">{row.customerName || 'Walk-in'}</td>
-                      <td className="px-3 py-2 uppercase text-xs">{row.serviceArea}</td>
-                      <td className="px-3 py-2">{row.serviceMode}</td>
-                      <td className="px-3 py-2">{row.status}</td>
-                      <td className="px-3 py-2">{formatCurrency(row.total)}</td>
-                      <td className="px-3 py-2 capitalize">{row.treatment.replace('_', ' ')}</td>
-                      <td className={`px-3 py-2 font-semibold ${row.includedInCollectibleCash ? 'text-green-700' : 'text-[var(--color-text-muted)]'}`}>
-                        {row.includedInCollectibleCash ? 'Yes' : 'No'}
+                    <tr key={`bakery-${row.orderId}`} className="border-t border-[var(--color-border)] hover:bg-[var(--color-bg-secondary)]/30 transition-colors">
+                      <td className="px-3 py-2.5 font-black text-xs">{row.orderId}</td>
+                      <td className="px-3 py-2.5 text-xs">{row.date ? formatDateTime(row.date) : 'Unknown'}</td>
+                      <td className="px-3 py-2.5 font-medium text-xs">
+                        <span>{row.customerName || 'Walk-in'}</span>
+                        {row.orderEntryMode === 'staff_assisted' && row.createdByStaffName && (
+                          <p className="text-[9px] text-[var(--color-primary)]/70 font-black uppercase tracking-wider mt-0.5">via {row.createdByStaffName}</p>
+                        )}
                       </td>
-                      <td className="px-3 py-2">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedAccountingOrderId(row.orderId)}
-                          disabled={row.serviceArea !== 'bakery'}
-                          className="rounded border border-[var(--color-border)] px-2 py-1 text-xs font-semibold disabled:opacity-50"
-                        >
-                          Edit Treatment
+                      <td className="px-3 py-2.5"><span className="text-[9px] font-black uppercase tracking-widest bg-[var(--color-bg-secondary)] border border-[var(--color-border)] px-2 py-0.5 rounded-full">{row.serviceArea}</span></td>
+                      <td className="px-3 py-2.5 text-xs capitalize">{row.serviceMode}</td>
+                      <td className="px-3 py-2.5 text-xs">{row.status}</td>
+                      <td className="px-3 py-2.5 font-black text-xs">{formatCurrency(row.total)}</td>
+                      <td className="px-3 py-2.5 capitalize text-xs">{row.treatment.replace('_', ' ')}</td>
+                      <td className={`px-3 py-2.5 text-xs font-black ${row.includedInCollectibleCash ? 'text-emerald-700' : 'text-[var(--color-text-muted)]'}`}>
+                        {row.includedInCollectibleCash ? '✓ Yes' : 'No'}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <button type="button" onClick={() => setSelectedAccountingOrderId(row.orderId)} disabled={row.serviceArea !== 'bakery' || (isClosed && currentUser?.role !== 'admin')}
+                          className="rounded-full bg-[var(--color-bg-secondary)] border border-[var(--color-border)] px-3 py-1 text-xs font-bold disabled:opacity-40 hover:border-[var(--color-primary)] hover:text-[var(--color-primary)] transition-colors">
+                          Edit
                         </button>
                       </td>
-                      <td className="px-3 py-2 text-[var(--color-text-muted)]">{row.exclusionReason || '—'}</td>
+                      <td className="px-3 py-2.5 text-xs text-[var(--color-text-muted)]">{row.exclusionReason || '—'}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          </section>
+          </details>
 
           {renderAccountingEditorPanel('bakery', bakeryDisplayAuditRows)}
 
-          <section className="rounded-2xl border border-[var(--color-border)] bg-white overflow-hidden">
+          {/* Stock Movement — collapsible */}
+          <details className="group rounded-[24px] border border-[var(--color-border)] bg-white overflow-hidden" open>
+            <summary className="px-5 py-4 border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]/40 cursor-pointer list-none flex items-center justify-between hover:bg-[var(--color-bg-secondary)] transition-colors">
+              <div>
+                <h3 className="text-lg font-serif">Stock Movement</h3>
+                <p className="text-xs font-semibold text-[var(--color-text-muted)] mt-0.5">
+                  Enter values in <span className="font-black text-[var(--color-text)]">white cells</span> · orange <span className="font-black text-[var(--color-primary)]">AUTO</span> cells are calculated
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-xs font-bold text-[var(--color-text-muted)] bg-[var(--color-border)] px-2.5 py-1 rounded-full">{workingLines.length} SKUs</span>
+                <ChevronDown className="w-4 h-4 text-[var(--color-text-muted)] group-open:rotate-180 transition-transform duration-200" />
+              </div>
+            </summary>
             <div className="overflow-x-auto">
               <table className="min-w-[980px] w-full text-sm">
-                <thead className="bg-[var(--color-bg-secondary)] text-left">
+                <thead className="text-left">
                   <tr>
-                    <th className="px-3 py-2">Item</th>
-                    <th className="px-3 py-2">SKU</th>
-                    <th className="px-3 py-2">Opening</th>
-                    <th className="px-3 py-2">Unit Price</th>
-                    <th className="px-3 py-2">Received</th>
-                    <th className="px-3 py-2">Sold</th>
-                    <th className="px-3 py-2">Expected Sales Value</th>
-                    <th className="px-3 py-2">Waste</th>
-                    <th className="px-3 py-2">Adjustment</th>
-                    <th className="px-3 py-2">Expected</th>
-                    <th className="px-3 py-2">Closing Actual</th>
-                    <th className="px-3 py-2">Variance</th>
+                    {/* Read-only columns */}
+                    <th className="px-3 py-3 text-xs font-semibold text-[var(--color-text-muted)] bg-[var(--color-bg-secondary)]">Item</th>
+                    <th className="px-3 py-3 text-xs font-semibold text-[var(--color-text-muted)] bg-[var(--color-bg-secondary)]">SKU</th>
+                    <th className="px-3 py-3 text-xs font-semibold text-[var(--color-text-muted)] bg-[var(--color-bg-secondary)]">Opening</th>
+                    <th className="px-3 py-3 text-xs font-semibold text-[var(--color-text-muted)] bg-[var(--color-bg-secondary)]">Unit Price</th>
+                    {/* Editable columns — white header */}
+                    <th className="px-3 py-3 text-xs font-black text-[var(--color-text)] bg-white border-l-2 border-[var(--color-primary)]/20">Received ✏</th>
+                    <th className="px-3 py-3 text-xs font-semibold text-[var(--color-text-muted)] bg-[var(--color-bg-secondary)]">Sold</th>
+                    {/* Auto column */}
+                    <th className="px-3 py-3 text-xs font-black text-[var(--color-primary)] bg-[var(--color-primary)]/5">Expected Sales</th>
+                    {/* Editable */}
+                    <th className="px-3 py-3 text-xs font-black text-[var(--color-text)] bg-white border-l-2 border-[var(--color-primary)]/20">Waste ✏</th>
+                    <th className="px-3 py-3 text-xs font-black text-[var(--color-text)] bg-white">Adjustment ✏</th>
+                    {/* Auto */}
+                    <th className="px-3 py-3 text-xs font-black text-[var(--color-primary)] bg-[var(--color-primary)]/5">Expected Closing</th>
+                    {/* Editable */}
+                    <th className="px-3 py-3 text-xs font-black text-[var(--color-text)] bg-white border-l-2 border-[var(--color-primary)]/20">Actual Closing ✏</th>
+                    {/* Auto */}
+                    <th className="px-3 py-3 text-xs font-black text-[var(--color-primary)] bg-[var(--color-primary)]/5">Variance</th>
                   </tr>
                 </thead>
                 <tbody>
                   {loading && (
-                    <tr><td colSpan={12} className="px-3 py-6 text-center text-[var(--color-text-muted)]">Loading bakery reconciliation data...</td></tr>
+                    <tr><td colSpan={12} className="px-3 py-8 text-center text-[var(--color-text-muted)] italic">Loading bakery reconciliation data...</td></tr>
                   )}
                   {!loading && workingLines.length === 0 && (
-                    <tr><td colSpan={12} className="px-3 py-6 text-center text-[var(--color-text-muted)]">No active bakery SKUs found.</td></tr>
+                    <tr><td colSpan={12} className="px-3 py-8 text-center text-[var(--color-text-muted)] italic">No active bakery SKUs found.</td></tr>
                   )}
                   {!loading && workingLines.map((line) => (
-                    <tr key={line.sku} className="border-t border-[var(--color-border)]">
-                      <td className="px-3 py-2 font-medium">{line.itemName}</td>
-                      <td className="px-3 py-2 text-xs text-[var(--color-text-muted)]">{line.sku}</td>
-                      <td className="px-3 py-2">{line.openingStock}</td>
-                      <td className="px-3 py-2">{formatCurrency(line.unitPrice)}</td>
-                      <td className="px-3 py-2">
-                        <input
-                          type="number"
-                          min={0}
-                          value={draftBySku[line.sku]?.receivedStock ?? 0}
-                          onChange={(event) => updateDraftField(line.sku, 'receivedStock', event.target.value)}
-                          disabled={!canEditBakery || isClosed}
-                          className="w-24 rounded border border-[var(--color-border)] px-2 py-1 disabled:bg-gray-100"
-                        />
+                    <tr key={line.sku} className="border-t border-[var(--color-border)] hover:bg-[var(--color-bg-secondary)]/20 transition-colors">
+                      <td className="px-3 py-2.5 font-bold text-sm bg-[var(--color-bg-secondary)]/30">{line.itemName}</td>
+                      <td className="px-3 py-2.5 text-xs font-semibold text-[var(--color-text-muted)] bg-[var(--color-bg-secondary)]/30">{line.sku}</td>
+                      <td className="px-3 py-2.5 font-semibold bg-[var(--color-bg-secondary)]/30">{line.openingStock}</td>
+                      <td className="px-3 py-2.5 text-xs bg-[var(--color-bg-secondary)]/30">{formatCurrency(line.unitPrice)}</td>
+                      <td className="px-3 py-2.5 border-l-2 border-[var(--color-primary)]/10">
+                        <input type="number" min={0} value={draftBySku[line.sku]?.receivedStock ?? 0} onChange={(e) => updateDraftField(line.sku, 'receivedStock', e.target.value)} disabled={!canEditBakery || isClosed} className={tableInputCls} />
                       </td>
-                      <td className="px-3 py-2">{line.soldStock}</td>
-                      <td className="px-3 py-2 font-semibold">{formatCurrency(line.expectedSalesValue)}</td>
-                      <td className="px-3 py-2">
-                        <input
-                          type="number"
-                          min={0}
-                          value={draftBySku[line.sku]?.waste ?? 0}
-                          onChange={(event) => updateDraftField(line.sku, 'waste', event.target.value)}
-                          disabled={!canEditBakery || isClosed}
-                          className="w-24 rounded border border-[var(--color-border)] px-2 py-1 disabled:bg-gray-100"
-                        />
+                      <td className="px-3 py-2.5 font-semibold bg-[var(--color-bg-secondary)]/30">{line.soldStock}</td>
+                      <td className="px-3 py-2.5 font-bold text-[var(--color-primary)] bg-[var(--color-primary)]/5">{formatCurrency(line.expectedSalesValue)}</td>
+                      <td className="px-3 py-2.5 border-l-2 border-[var(--color-primary)]/10">
+                        <input type="number" min={0} value={draftBySku[line.sku]?.waste ?? 0} onChange={(e) => updateDraftField(line.sku, 'waste', e.target.value)} disabled={!canEditBakery || isClosed} className={tableInputCls} />
                       </td>
-                      <td className="px-3 py-2">
-                        <input
-                          type="number"
-                          value={draftBySku[line.sku]?.adjustment ?? 0}
-                          onChange={(event) => updateDraftField(line.sku, 'adjustment', event.target.value)}
-                          disabled={!canEditBakery || isClosed}
-                          className="w-24 rounded border border-[var(--color-border)] px-2 py-1 disabled:bg-gray-100"
-                        />
+                      <td className="px-3 py-2.5">
+                        <input type="number" value={draftBySku[line.sku]?.adjustment ?? 0} onChange={(e) => updateDraftField(line.sku, 'adjustment', e.target.value)} disabled={!canEditBakery || isClosed} className={tableInputCls} />
                       </td>
-                      <td className="px-3 py-2 font-semibold">{line.closingExpected}</td>
-                      <td className="px-3 py-2">
-                        <input
-                          type="number"
-                          min={0}
-                          value={draftBySku[line.sku]?.closingActualInput ?? ''}
-                          onChange={(event) => updateDraftField(line.sku, 'closingActualInput', event.target.value)}
-                          disabled={!canEditBakery || isClosed}
-                          className="w-24 rounded border border-[var(--color-border)] px-2 py-1 disabled:bg-gray-100"
-                        />
+                      <td className="px-3 py-2.5 font-bold text-[var(--color-primary)] bg-[var(--color-primary)]/5">{line.closingExpected}</td>
+                      <td className="px-3 py-2.5 border-l-2 border-[var(--color-primary)]/10">
+                        <input type="number" min={0} value={draftBySku[line.sku]?.closingActualInput ?? ''} onChange={(e) => updateDraftField(line.sku, 'closingActualInput', e.target.value)} disabled={!canEditBakery || isClosed} className={tableInputCls} />
                       </td>
-                      <td className={`px-3 py-2 font-semibold ${(line.variance || 0) === 0 ? 'text-[var(--color-text)]' : (line.variance || 0) > 0 ? 'text-green-700' : 'text-red-700'}`}>
+                      <td className={`px-3 py-2.5 font-black bg-[var(--color-primary)]/5 ${(line.variance || 0) === 0 ? 'text-[var(--color-text)]' : (line.variance || 0) > 0 ? 'text-emerald-700' : 'text-red-700'}`}>
                         {typeof line.variance === 'number' ? line.variance : '—'}
                       </td>
                     </tr>
                   ))}
                 </tbody>
-                <tfoot className="bg-[var(--color-bg-secondary)] font-semibold">
-                  <tr>
-                    <td className="px-3 py-2">Totals</td>
-                    <td className="px-3 py-2">—</td>
-                    <td className="px-3 py-2">{totals.openingStock}</td>
-                    <td className="px-3 py-2">—</td>
-                    <td className="px-3 py-2">{totals.receivedStock}</td>
-                    <td className="px-3 py-2">{totals.soldStock}</td>
-                    <td className="px-3 py-2">{formatCurrency(totals.expectedSalesValue)}</td>
-                    <td className="px-3 py-2">{totals.waste}</td>
-                    <td className="px-3 py-2">{totals.adjustment}</td>
-                    <td className="px-3 py-2">{totals.closingExpected}</td>
-                    <td className="px-3 py-2">{totals.closingActual}</td>
-                    <td className={totals.variance === 0 ? 'px-3 py-2' : totals.variance > 0 ? 'px-3 py-2 text-green-700' : 'px-3 py-2 text-red-700'}>
-                      {totals.variance}
-                    </td>
+                <tfoot className="border-t-2 border-[var(--color-border)]">
+                  <tr className="font-black text-sm">
+                    <td className="px-3 py-3 text-xs uppercase tracking-widest text-[var(--color-text-muted)] bg-[var(--color-bg-secondary)]">Totals</td>
+                    <td className="px-3 py-3 bg-[var(--color-bg-secondary)]">—</td>
+                    <td className="px-3 py-3 bg-[var(--color-bg-secondary)]">{totals.openingStock}</td>
+                    <td className="px-3 py-3 bg-[var(--color-bg-secondary)]">—</td>
+                    <td className="px-3 py-3">{totals.receivedStock}</td>
+                    <td className="px-3 py-3 bg-[var(--color-bg-secondary)]">{totals.soldStock}</td>
+                    <td className="px-3 py-3 text-[var(--color-primary)] bg-[var(--color-primary)]/5">{formatCurrency(totals.expectedSalesValue)}</td>
+                    <td className="px-3 py-3">{totals.waste}</td>
+                    <td className="px-3 py-3">{totals.adjustment}</td>
+                    <td className="px-3 py-3 text-[var(--color-primary)] bg-[var(--color-primary)]/5">{totals.closingExpected}</td>
+                    <td className="px-3 py-3">{totals.closingActual}</td>
+                    <td className={`px-3 py-3 bg-[var(--color-primary)]/5 ${totals.variance === 0 ? '' : totals.variance > 0 ? 'text-emerald-700' : 'text-red-700'}`}>{totals.variance}</td>
                   </tr>
                 </tfoot>
               </table>
             </div>
-          </section>
+          </details>
 
-          <section className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={handleOpenDay}
-              disabled={!canEditBakery || busy || !!reconciliation || workingLines.length === 0}
-              className="rounded-xl bg-[var(--color-primary)] text-white px-4 py-2 text-sm font-semibold disabled:opacity-50"
-            >
-              {busy ? <Loader2 className="w-4 h-4 animate-spin inline" /> : null} Open Day
+          {/* Action bar */}
+          <section className="rounded-[24px] border border-[var(--color-border)] bg-[var(--color-bg-secondary)]/40 p-4 flex flex-wrap gap-3 items-center">
+            {canManageBakeryLifecycle && (
+              <button type="button" onClick={handleOpenDay} disabled={busy || !!reconciliation || workingLines.length === 0}
+                className="flex items-center gap-2 rounded-[20px] bg-[var(--color-primary)] text-white px-6 py-3 text-xs font-black uppercase tracking-[0.2em] shadow-lg shadow-[var(--color-primary)]/10 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Open Day
+              </button>
+            )}
+            <button type="button" onClick={handleSaveDraft} disabled={!canEditBakery || busy || isClosed || workingLines.length === 0 || !reconciliation}
+              className="flex items-center gap-2 rounded-[20px] border-2 border-[var(--color-border)] bg-white px-6 py-3 text-xs font-black uppercase tracking-[0.2em] active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed hover:border-[var(--color-primary)] hover:text-[var(--color-primary)]">
+              <Save className="w-4 h-4" /> Save Draft
             </button>
-            <button
-              type="button"
-              onClick={handleSaveDraft}
-              disabled={!canEditBakery || busy || isClosed || workingLines.length === 0}
-              className="rounded-xl border border-[var(--color-border)] bg-white px-4 py-2 text-sm font-semibold disabled:opacity-50"
-            >
-              <Save className="w-4 h-4 inline mr-1" /> Save Draft
-            </button>
-            <button
-              type="button"
-              onClick={handleCloseDay}
-              disabled={!canEditBakery || busy || isClosed || workingLines.length === 0}
-              className="rounded-xl bg-emerald-600 text-white px-4 py-2 text-sm font-semibold disabled:opacity-50"
-            >
-              <ClipboardCheck className="w-4 h-4 inline mr-1" /> Close Day
-            </button>
+            {canManageBakeryLifecycle && (
+              <>
+                <button type="button" onClick={handleCloseDay} disabled={busy || isClosed || workingLines.length === 0 || !reconciliation}
+                  className="flex items-center gap-2 rounded-[20px] bg-emerald-600 text-white px-6 py-3 text-xs font-black uppercase tracking-[0.2em] shadow-lg shadow-emerald-200 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                  <ClipboardCheck className="w-4 h-4" /> Close Day
+                </button>
+                {isClosed && (
+                  <button type="button" onClick={handleReopenDay} disabled={busy || !reconciliation}
+                    className="flex items-center gap-2 rounded-[20px] bg-amber-600 text-white px-6 py-3 text-xs font-black uppercase tracking-[0.2em] shadow-lg shadow-amber-200 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                    Reopen Day
+                  </button>
+                )}
+              </>
+            )}
+            {!canManageBakeryLifecycle && (
+              <p className="text-xs font-semibold text-[var(--color-text-muted)]">Accountant mode: value updates only. Day open/close/reopen is admin-managed.</p>
+            )}
           </section>
         </>
+
       ) : (
+
+        /* ══════════════════════════════════════════════════════════════════
+           CAFE MODE
+        ══════════════════════════════════════════════════════════════════ */
         <>
-          <section className="grid grid-cols-2 xl:grid-cols-6 gap-3">
-            <article className="rounded-2xl border border-[var(--color-border)] bg-white p-4">
-              <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Collectible Expected Cash</p>
-              <p className="mt-1 text-2xl font-semibold">{formatCurrency(cafeTotals.collectibleExpectedCash)}</p>
-            </article>
-            <article className="rounded-2xl border border-[var(--color-border)] bg-white p-4">
-              <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Total Received</p>
-              <p className="mt-1 text-2xl font-semibold">{formatCurrency(cafeTotals.totalReceived)}</p>
-            </article>
-            <article className="rounded-2xl border border-[var(--color-border)] bg-white p-4">
-              <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Variance</p>
-              <p className={`mt-1 text-2xl font-semibold ${cafeTotals.variance === 0 ? '' : cafeTotals.variance > 0 ? 'text-green-700' : 'text-red-700'}`}>
-                {formatCurrency(cafeTotals.variance)}
-              </p>
-            </article>
-            <article className="rounded-2xl border border-[var(--color-border)] bg-white p-4">
-              <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Gross Completed Sales</p>
-              <p className="mt-1 text-2xl font-semibold">{formatCurrency(cafeTotals.grossCompletedSales)}</p>
-            </article>
-            <article className="rounded-2xl border border-[var(--color-border)] bg-white p-4">
-              <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Credit Outstanding</p>
-              <p className="mt-1 text-2xl font-semibold">{formatCurrency(cafeTotals.creditValue)}</p>
-            </article>
-            <article className="rounded-2xl border border-[var(--color-border)] bg-white p-4">
-              <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">Complimentary Value</p>
-              <p className="mt-1 text-2xl font-semibold">{formatCurrency(cafeTotals.complimentaryValue)}</p>
-            </article>
+          {/* KPIs */}
+          <section className="grid grid-cols-2 xl:grid-cols-3 gap-3">
+            {renderKpiCard('Collectible Expected Cash', formatCurrency(cafeTotals.collectibleExpectedCash), 'primary')}
+            {renderKpiCard('Total Received', formatCurrency(cafeTotals.totalReceived))}
+            {renderKpiCard('Variance', formatCurrency(cafeTotals.variance),
+              cafeTotals.variance === 0 ? undefined : cafeTotals.variance > 0 ? 'positive' : 'negative')}
+            {renderKpiCard('Gross Completed Sales', formatCurrency(cafeTotals.grossCompletedSales))}
+            {renderKpiCard('Credit Outstanding', formatCurrency(cafeTotals.creditValue))}
+            {renderKpiCard('Complimentary Value', formatCurrency(cafeTotals.complimentaryValue))}
           </section>
 
+          {/* Payment Entry + Settlement 2-col */}
           <section className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            <article className="rounded-2xl border border-[var(--color-border)] bg-white p-4 space-y-4">
-              <header>
-                <h3 className="text-lg font-semibold">Payment Entry</h3>
-                <p className="text-xs text-[var(--color-text-muted)]">Enter actual receipts captured for this business date.</p>
-              </header>
+
+            {/* Payment Entry — editable inputs */}
+            <article className="rounded-[24px] border border-[var(--color-border)] bg-white p-6 space-y-5">
+              <div className="pb-4 border-b border-[var(--color-border)]">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <h3 className="text-xl font-serif">Payment Entry</h3>
+                  <span className="text-[9px] font-black uppercase tracking-widest bg-[var(--color-text)] text-white px-2 py-0.5 rounded-full">Enter values</span>
+                </div>
+                <p className="text-xs font-semibold text-[var(--color-text-muted)]">Auto-captured from completed cafe orders with recorded payments</p>
+              </div>
               {cafeReconciliation && !cafeReconciliation.cashControl && (
-                <p className="text-xs text-amber-700">Legacy record: cash-control fields were not captured on this historical day.</p>
+                <p className="text-xs text-amber-700 bg-amber-50 rounded-[12px] px-3 py-2">Legacy record: cash-control fields were not captured on this historical day.</p>
               )}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <label className="text-sm">
-                  <span className="block text-[var(--color-text-muted)] mb-1">Cash Received</span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={cafeDraft.cashReceived}
-                    onChange={(event) => updateCafeDraftNumber('cashReceived', event.target.value)}
-                    disabled={!canEditCafe || cafeStatusClosed}
-                    className="w-full rounded-lg border border-[var(--color-border)] px-3 py-2 disabled:bg-gray-100"
-                  />
-                </label>
-                <label className="text-sm">
-                  <span className="block text-[var(--color-text-muted)] mb-1">Mobile Money</span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={cafeDraft.mobileMoneyReceived}
-                    onChange={(event) => updateCafeDraftNumber('mobileMoneyReceived', event.target.value)}
-                    disabled={!canEditCafe || cafeStatusClosed}
-                    className="w-full rounded-lg border border-[var(--color-border)] px-3 py-2 disabled:bg-gray-100"
-                  />
-                </label>
-                <label className="text-sm">
-                  <span className="block text-[var(--color-text-muted)] mb-1">Bank / Transfer</span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={cafeDraft.bankReceived}
-                    onChange={(event) => updateCafeDraftNumber('bankReceived', event.target.value)}
-                    disabled={!canEditCafe || cafeStatusClosed}
-                    className="w-full rounded-lg border border-[var(--color-border)] px-3 py-2 disabled:bg-gray-100"
-                  />
-                </label>
-                <label className="text-sm">
-                  <span className="block text-[var(--color-text-muted)] mb-1">Other</span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={cafeDraft.otherReceived}
-                    onChange={(event) => updateCafeDraftNumber('otherReceived', event.target.value)}
-                    disabled={!canEditCafe || cafeStatusClosed}
-                    className="w-full rounded-lg border border-[var(--color-border)] px-3 py-2 disabled:bg-gray-100"
-                  />
-                </label>
+
+              <div>
+                <p className="text-xs font-black uppercase tracking-widest text-[var(--color-text-muted)] mb-3">Payment Methods Received</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <label className="space-y-1.5">
+                    <span className={labelCls}>Cash Received</span>
+                    <input type="number" min={0} value={cafeDraft.cashReceived} readOnly disabled className={inputCls} />
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className={labelCls}>Mobile Money</span>
+                    <input type="number" min={0} value={cafeDraft.mobileMoneyReceived} readOnly disabled className={inputCls} />
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className={labelCls}>Bank / Transfer</span>
+                    <input type="number" min={0} value={cafeDraft.bankReceived} readOnly disabled className={inputCls} />
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className={labelCls}>Other</span>
+                    <input type="number" min={0} value={cafeDraft.otherReceived} readOnly disabled className={inputCls} />
+                  </label>
+                </div>
               </div>
-              <label className="text-sm block">
-                <span className="block text-[var(--color-text-muted)] mb-1">Notes</span>
-                <textarea
-                  rows={3}
-                  value={cafeDraft.notes}
-                  onChange={(event) => setCafeDraft((prev) => ({ ...prev, notes: event.target.value }))}
-                  disabled={!canEditCafe || cafeStatusClosed}
-                  className="w-full rounded-lg border border-[var(--color-border)] px-3 py-2 disabled:bg-gray-100"
-                />
+
+              <label className="space-y-1.5 block">
+                <span className={labelCls}>Notes</span>
+                <textarea rows={3} value={cafeDraft.notes} onChange={(e) => setCafeDraft((prev) => ({ ...prev, notes: e.target.value }))} disabled={!canEditCafe || cafeStatusClosed} className={`${inputCls} resize-none`} />
               </label>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <label className="text-sm">
-                  <span className="block text-[var(--color-text-muted)] mb-1">Opening Cash Float</span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={cafeCashDraft.openingCashFloat}
-                    onChange={(event) => updateCashDraftNumber('cafe', 'openingCashFloat', event.target.value)}
-                    disabled={!canEditCafe || cafeStatusClosed}
-                    className="w-full rounded-lg border border-[var(--color-border)] px-3 py-2 disabled:bg-gray-100"
-                  />
-                </label>
-                <label className="text-sm">
-                  <span className="block text-[var(--color-text-muted)] mb-1">Cash Removed</span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={cafeCashDraft.cashRemoved}
-                    onChange={(event) => updateCashDraftNumber('cafe', 'cashRemoved', event.target.value)}
-                    disabled={!canEditCafe || cafeStatusClosed}
-                    className="w-full rounded-lg border border-[var(--color-border)] px-3 py-2 disabled:bg-gray-100"
-                  />
-                </label>
-                <label className="text-sm">
-                  <span className="block text-[var(--color-text-muted)] mb-1">Actual Counted Cash</span>
-                  <input
-                    type="number"
-                    min={0}
-                    value={cafeCashDraft.actualCountedCash}
-                    onChange={(event) => updateCashDraftNumber('cafe', 'actualCountedCash', event.target.value)}
-                    disabled={!canEditCafe || cafeStatusClosed}
-                    className="w-full rounded-lg border border-[var(--color-border)] px-3 py-2 disabled:bg-gray-100"
-                  />
-                </label>
+
+              <div>
+                <p className="text-xs font-black uppercase tracking-widest text-[var(--color-text-muted)] mb-3">Cash Control</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <label className="space-y-1.5">
+                    <span className={labelCls}>Opening Cash Float</span>
+                    <input type="number" min={0} value={cafeCashDraft.openingCashFloat} onChange={(e) => updateCashDraftNumber('cafe', 'openingCashFloat', e.target.value)} disabled={!canEditCafe || cafeStatusClosed} className={inputCls} />
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className={labelCls}>Cash Removed</span>
+                    <input type="number" min={0} value={cafeCashDraft.cashRemoved} onChange={(e) => updateCashDraftNumber('cafe', 'cashRemoved', e.target.value)} disabled={!canEditCafe || cafeStatusClosed} className={inputCls} />
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className={labelCls}>Actual Counted Cash</span>
+                    <input type="number" min={0} value={cafeCashDraft.actualCountedCash} onChange={(e) => updateCashDraftNumber('cafe', 'actualCountedCash', e.target.value)} disabled={!canEditCafe || cafeStatusClosed} className={inputCls} />
+                  </label>
+                </div>
               </div>
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div><p className="text-[var(--color-text-muted)]">Expected Drawer Cash</p><p className="font-semibold">{formatCurrency(cafeCashControl.expectedDrawerCash)}</p></div>
-                <div><p className="text-[var(--color-text-muted)]">Cash Over/Short</p><p className={`font-semibold ${cafeCashControl.cashOverShort === 0 ? '' : cafeCashControl.cashOverShort > 0 ? 'text-green-700' : 'text-red-700'}`}>{formatCurrency(cafeCashControl.cashOverShort)}</p></div>
+
+              {/* Calculated outputs */}
+              <div>
+                <p className="text-xs font-black uppercase tracking-widest text-[var(--color-text-muted)] mb-3">Calculated Results</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {renderComputed('Expected Drawer Cash', formatCurrency(cafeCashControl.expectedDrawerCash))}
+                  {renderComputed('Cash Over / Short', formatCurrency(cafeCashControl.cashOverShort),
+                    cafeCashControl.cashOverShort > 0 ? 'positive' : cafeCashControl.cashOverShort < 0 ? 'negative' : undefined)}
+                </div>
               </div>
-              <label className="text-sm block">
-                <span className="block text-[var(--color-text-muted)] mb-1">Handover Notes</span>
-                <textarea
-                  rows={2}
-                  value={cafeCashDraft.handoverNotes}
-                  onChange={(event) => updateCashDraftText('cafe', event.target.value)}
-                  disabled={!canEditCafe || cafeStatusClosed}
-                  className="w-full rounded-lg border border-[var(--color-border)] px-3 py-2 disabled:bg-gray-100"
-                />
+
+              <label className="space-y-1.5 block">
+                <span className={labelCls}>Handover Notes</span>
+                <textarea rows={2} value={cafeCashDraft.handoverNotes} onChange={(e) => updateCashDraftText('cafe', e.target.value)} disabled={!canEditCafe || cafeStatusClosed} className={`${inputCls} resize-none`} />
               </label>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => updateHandoverStatusDraft('cafe', 'handed_over')}
-                  disabled={!canEditCafe || cafeStatusClosed}
-                  className="rounded border border-[var(--color-border)] px-3 py-1 text-xs font-semibold disabled:opacity-50"
-                >
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={() => updateHandoverStatusDraft('cafe', 'handed_over')} disabled={!canEditCafe || cafeStatusClosed} className="rounded-full border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-4 py-2 text-xs font-bold disabled:opacity-50 hover:bg-[var(--color-border)] transition-colors">
                   Mark Handed Over
                 </button>
-                <button
-                  type="button"
-                  onClick={() => updateHandoverStatusDraft('cafe', 'received')}
-                  disabled={!canEditCafe || cafeStatusClosed}
-                  className="rounded border border-[var(--color-border)] px-3 py-1 text-xs font-semibold disabled:opacity-50"
-                >
+                <button type="button" onClick={() => updateHandoverStatusDraft('cafe', 'received')} disabled={!canEditCafe || cafeStatusClosed} className="rounded-full border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-4 py-2 text-xs font-bold disabled:opacity-50 hover:bg-[var(--color-border)] transition-colors">
                   Mark Received
                 </button>
-                <p className="text-xs text-[var(--color-text-muted)] self-center">Handover Status: <strong>{cafeCashDraft.handoverStatus}</strong></p>
+                <span className="text-xs font-semibold text-[var(--color-text-muted)]">
+                  Status: <strong className="text-[var(--color-text)]">{cafeCashDraft.handoverStatus}</strong>
+                </span>
               </div>
             </article>
 
-            <article className="rounded-2xl border border-[var(--color-border)] bg-white p-4">
-              <header className="mb-3">
-                <h3 className="text-lg font-semibold">Settlement / Treatment Summary</h3>
-                <p className="text-xs text-[var(--color-text-muted)]">Use treatment classifications to convert gross sales into collectible expected cash.</p>
-              </header>
-              <div className="grid grid-cols-2 gap-3 text-sm mb-4">
-                <div><p className="text-[var(--color-text-muted)]">Status</p><p className="font-semibold">{cafeReconciliation?.status || 'not_opened'}</p></div>
-                <div><p className="text-[var(--color-text-muted)]">Last Updated</p><p className="font-semibold">{cafeReconciliation ? formatDateTime(cafeReconciliation.updatedAt) : 'Not yet'}</p></div>
-                <div><p className="text-[var(--color-text-muted)]">Cancelled</p><p className="font-semibold">{cafeTotals.cancelledOrders}</p></div>
-                <div><p className="text-[var(--color-text-muted)]">Pending</p><p className="font-semibold">{cafeTotals.pendingOrders}</p></div>
-                <div><p className="text-[var(--color-text-muted)]">Completed</p><p className="font-semibold">{cafeTotals.completedOrders}</p></div>
-                <div><p className="text-[var(--color-text-muted)]">Total Orders</p><p className="font-semibold">{cafeTotals.totalOrders}</p></div>
+            {/* Settlement Summary — all read-only */}
+            <article className="rounded-[24px] border border-[var(--color-border)] bg-white p-6 space-y-5">
+              <div className="pb-4 border-b border-[var(--color-border)]">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <h3 className="text-xl font-serif">Settlement Summary</h3>
+                  <span className="text-[9px] font-black uppercase tracking-widest bg-[var(--color-primary)]/10 text-[var(--color-primary)] px-2 py-0.5 rounded-full">Read-only</span>
+                </div>
+                <p className="text-xs font-semibold text-[var(--color-text-muted)]">Classify gross sales into collectible expected cash</p>
               </div>
-
-              <div className="grid grid-cols-2 gap-3 text-sm mb-4">
-                <div><p className="text-[var(--color-text-muted)]">Gross Completed Sales</p><p className="font-semibold">{formatCurrency(cafeTotals.grossCompletedSales)}</p></div>
-                <div><p className="text-[var(--color-text-muted)]">Complimentary Value</p><p className="font-semibold">{formatCurrency(cafeTotals.complimentaryValue)}</p></div>
-                <div><p className="text-[var(--color-text-muted)]">Credit Outstanding</p><p className="font-semibold">{formatCurrency(cafeTotals.creditValue)}</p></div>
-                <div><p className="text-[var(--color-text-muted)]">Mixed Review Value</p><p className="font-semibold">{formatCurrency(cafeTotals.mixedReviewValue)}</p></div>
+              <div className="grid grid-cols-2 gap-3">
+                {renderStatChip('Status',       cafeReconciliation?.status ?? 'not_opened')}
+                {renderStatChip('Last Updated', cafeReconciliation ? formatDateTime(cafeReconciliation.updatedAt) : 'Not yet')}
+                {renderStatChip('Cancelled',    String(cafeTotals.cancelledOrders))}
+                {renderStatChip('Pending',      String(cafeTotals.pendingOrders))}
+                {renderStatChip('Completed',    String(cafeTotals.completedOrders))}
+                {renderStatChip('Total Orders', String(cafeTotals.totalOrders))}
               </div>
-              <div className="grid grid-cols-2 gap-3 text-sm mt-3">
-                <div><p className="text-[var(--color-text-muted)]">Handed Over By</p><p className="font-semibold">{cafeCashDraft.handedOverBy?.displayName || '—'}</p></div>
-                <div><p className="text-[var(--color-text-muted)]">Handed Over At</p><p className="font-semibold">{cafeCashDraft.handedOverAt ? formatDateTime(cafeCashDraft.handedOverAt) : '—'}</p></div>
-                <div><p className="text-[var(--color-text-muted)]">Received By</p><p className="font-semibold">{cafeCashDraft.receivedBy?.displayName || '—'}</p></div>
-                <div><p className="text-[var(--color-text-muted)]">Received At</p><p className="font-semibold">{cafeCashDraft.receivedAt ? formatDateTime(cafeCashDraft.receivedAt) : '—'}</p></div>
+              <div className="grid grid-cols-2 gap-3">
+                {renderStatChip('Gross Completed Sales', formatCurrency(cafeTotals.grossCompletedSales))}
+                {renderStatChip('Complimentary Value',   formatCurrency(cafeTotals.complimentaryValue))}
+                {renderStatChip('Credit Outstanding',    formatCurrency(cafeTotals.creditValue))}
+                {renderStatChip('Mixed Review Value',    formatCurrency(cafeTotals.mixedReviewValue))}
               </div>
-
+              <div className="border-t border-[var(--color-border)] pt-4 space-y-3">
+                <p className="text-xs font-black uppercase tracking-widest text-[var(--color-text-muted)]">Handover Record</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { label: 'Handed Over By', value: cafeCashDraft.handedOverBy?.displayName || '—' },
+                    { label: 'Handed Over At', value: cafeCashDraft.handedOverAt ? formatDateTime(cafeCashDraft.handedOverAt) : '—' },
+                    { label: 'Received By',    value: cafeCashDraft.receivedBy?.displayName || '—' },
+                    { label: 'Received At',    value: cafeCashDraft.receivedAt ? formatDateTime(cafeCashDraft.receivedAt) : '—' },
+                  ].map(({ label, value }) => (
+                    <div key={label}>
+                      <p className="text-xs font-semibold text-[var(--color-text-muted)] mb-0.5">{label}</p>
+                      <p className="text-sm font-bold text-[var(--color-text)]">{value}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </article>
           </section>
 
+          {/* Service Mode Breakdown + Exclusions */}
           <section className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            <article className="rounded-2xl border border-[var(--color-border)] bg-white p-4">
-              <header className="mb-3">
-                <h3 className="text-lg font-semibold">Service Mode Breakdown</h3>
-              </header>
-              <div className="overflow-x-auto rounded-xl border border-[var(--color-border)]">
-                <table className="min-w-[520px] w-full text-sm">
-                  <thead className="bg-[var(--color-bg-secondary)] text-left">
+            <article className="rounded-[24px] border border-[var(--color-border)] bg-white p-5 space-y-4">
+              <h3 className="text-lg font-serif">Service Mode Breakdown</h3>
+              <div className="rounded-[16px] border border-[var(--color-border)] overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-[var(--color-bg-secondary)]">
                     <tr>
-                      <th className="px-3 py-2">Service Mode</th>
-                      <th className="px-3 py-2">Count</th>
-                      <th className="px-3 py-2">Value</th>
+                      {['Service Mode','Count','Value'].map(col => (
+                        <th key={col} className="px-4 py-3 text-left text-xs font-semibold text-[var(--color-text-muted)]">{col}</th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
-                    <tr className="border-t border-[var(--color-border)]">
-                      <td className="px-3 py-2 font-medium">Dine-in</td>
-                      <td className="px-3 py-2">{cafeTotals.dineInOrders}</td>
-                      <td className="px-3 py-2">{formatCurrency(cafeTotals.dineInValue)}</td>
-                    </tr>
-                    <tr className="border-t border-[var(--color-border)]">
-                      <td className="px-3 py-2 font-medium">Pickup</td>
-                      <td className="px-3 py-2">{cafeTotals.pickupOrders}</td>
-                      <td className="px-3 py-2">{formatCurrency(cafeTotals.pickupValue)}</td>
-                    </tr>
-                    <tr className="border-t border-[var(--color-border)]">
-                      <td className="px-3 py-2 font-medium">Delivery</td>
-                      <td className="px-3 py-2">{cafeTotals.deliveryOrders}</td>
-                      <td className="px-3 py-2">{formatCurrency(cafeTotals.deliveryValue)}</td>
-                    </tr>
+                    {[
+                      { label: 'Dine-in',  count: cafeTotals.dineInOrders,   value: formatCurrency(cafeTotals.dineInValue) },
+                      { label: 'Pickup',   count: cafeTotals.pickupOrders,   value: formatCurrency(cafeTotals.pickupValue) },
+                      { label: 'Delivery', count: cafeTotals.deliveryOrders, value: formatCurrency(cafeTotals.deliveryValue) },
+                    ].map(({ label, count, value }) => (
+                      <tr key={label} className="border-t border-[var(--color-border)] hover:bg-[var(--color-bg-secondary)]/30 transition-colors">
+                        <td className="px-4 py-3 font-bold">{label}</td>
+                        <td className="px-4 py-3 font-semibold">{count}</td>
+                        <td className="px-4 py-3 font-bold text-[var(--color-primary)]">{value}</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
             </article>
 
-            <article className="rounded-2xl border border-[var(--color-border)] bg-white p-4 space-y-2">
-              <h3 className="text-lg font-semibold">Non-Collectible / Exclusions</h3>
-              <p className="text-xs text-[var(--color-text-muted)]">
-                Mixed bakery+cafe orders are excluded from cafe reconciliation until split allocation is implemented.
-              </p>
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div><p className="text-[var(--color-text-muted)]">Mixed Unresolved</p><p className="font-semibold">{cafeTotals.excludedMixedOrders}</p></div>
-                <div><p className="text-[var(--color-text-muted)]">Pending Excluded</p><p className="font-semibold">{cafeTotals.excludedPendingOrders}</p></div>
-                <div><p className="text-[var(--color-text-muted)]">Cancelled Excluded</p><p className="font-semibold">{cafeTotals.excludedCancelledOrders}</p></div>
-                <div><p className="text-[var(--color-text-muted)]">Completed Orders</p><p className="font-semibold">{cafeTotals.completedOrders}</p></div>
+            <article className="rounded-[24px] border border-[var(--color-border)] bg-white p-5 space-y-4">
+              <div>
+                <h3 className="text-lg font-serif">Non-Collectible / Exclusions</h3>
+                <p className="text-xs font-semibold text-[var(--color-text-muted)] mt-0.5">Mixed bakery+cafe orders excluded until split allocation is implemented</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {renderStatChip('Mixed Unresolved',   String(cafeTotals.excludedMixedOrders))}
+                {renderStatChip('Pending Excluded',   String(cafeTotals.excludedPendingOrders))}
+                {renderStatChip('Cancelled Excluded', String(cafeTotals.excludedCancelledOrders))}
+                {renderStatChip('Completed Orders',   String(cafeTotals.completedOrders))}
               </div>
             </article>
           </section>
 
-          <section className="rounded-2xl border border-[var(--color-border)] bg-white overflow-hidden">
-            <header className="px-4 py-3 border-b border-[var(--color-border)]">
-              <h3 className="text-lg font-semibold">Included-Order Audit</h3>
-              <p className="text-xs text-[var(--color-text-muted)]">Shows exactly which orders are collectible today and which are excluded by treatment or status.</p>
-            </header>
+          {/* Cafe Item Sales — collapsible */}
+          <details className="group rounded-[24px] border border-[var(--color-border)] bg-white overflow-hidden">
+            <summary className="px-5 py-4 border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]/40 cursor-pointer list-none flex items-center justify-between hover:bg-[var(--color-bg-secondary)] transition-colors">
+              <div>
+                <h3 className="text-lg font-serif">Item Sales Ledger</h3>
+                <p className="text-xs font-semibold text-[var(--color-text-muted)] mt-0.5">Item-level completed cafe sales for this business date</p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-xs font-bold text-[var(--color-text-muted)] bg-[var(--color-border)] px-2.5 py-1 rounded-full">{cafeItemSalesSummary.length} items</span>
+                <ChevronDown className="w-4 h-4 text-[var(--color-text-muted)] group-open:rotate-180 transition-transform duration-200" />
+              </div>
+            </summary>
+            <div className="p-5 space-y-4">
+              {/* Filters */}
+              <div className="flex flex-wrap gap-3">
+                <div className="flex items-center gap-2 rounded-[14px] border border-[var(--color-border)] bg-[var(--color-bg-secondary)]/30 px-3 flex-1 min-w-[160px]">
+                  <svg className="w-3.5 h-3.5 text-[var(--color-text-muted)] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                  <input
+                    value={cafeItemSearch}
+                    onChange={(e) => setCafeItemSearch(e.target.value)}
+                    placeholder="Search item or order ID"
+                    className="w-full bg-transparent py-2 text-xs outline-none"
+                  />
+                </div>
+                <select
+                  value={cafeItemServiceModeFilter}
+                  onChange={(e) => setCafeItemServiceModeFilter(e.target.value as typeof cafeItemServiceModeFilter)}
+                  className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-bg-secondary)]/30 px-3 py-2 text-xs font-semibold"
+                >
+                  <option value="all">All modes</option>
+                  <option value="pickup">Pickup</option>
+                  <option value="dine_in">Dine-in</option>
+                  <option value="delivery">Delivery</option>
+                </select>
+                <select
+                  value={cafeItemPaymentFilter}
+                  onChange={(e) => setCafeItemPaymentFilter(e.target.value as typeof cafeItemPaymentFilter)}
+                  className="rounded-[14px] border border-[var(--color-border)] bg-[var(--color-bg-secondary)]/30 px-3 py-2 text-xs font-semibold"
+                >
+                  <option value="all">All payments</option>
+                  <option value="cash">Cash</option>
+                  <option value="mobile_money">Mobile money</option>
+                  <option value="pay_later">Pay later</option>
+                </select>
+              </div>
+
+              {/* Summary table */}
+              {cafeItemSalesSummary.length === 0 ? (
+                <p className="text-center text-sm text-[var(--color-text-muted)] italic py-6">No completed cafe sales match these filters.</p>
+              ) : (
+                <div className="rounded-[16px] border border-[var(--color-border)] overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-[var(--color-bg-secondary)] text-left">
+                      <tr>
+                        {['Item', 'Qty Sold', 'Gross Value', 'Orders'].map((col) => (
+                          <th key={col} className="px-4 py-3 text-xs font-semibold text-[var(--color-text-muted)] whitespace-nowrap">{col}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cafeItemSalesSummary.map((row) => (
+                        <tr key={row.itemName} className="border-t border-[var(--color-border)] hover:bg-[var(--color-bg-secondary)]/30 transition-colors">
+                          <td className="px-4 py-3 font-semibold">{row.itemName}</td>
+                          <td className="px-4 py-3 font-bold">{row.qtySold}</td>
+                          <td className="px-4 py-3 font-bold text-[var(--color-primary)]">{formatCurrency(row.grossValue)}</td>
+                          <td className="px-4 py-3 text-[var(--color-text-muted)]">{row.orderCount}</td>
+                        </tr>
+                      ))}
+                      <tr className="border-t-2 border-[var(--color-border)] bg-[var(--color-bg-secondary)]/50 font-black">
+                        <td className="px-4 py-3 text-xs uppercase tracking-widest">Total</td>
+                        <td className="px-4 py-3">{cafeItemSalesSummary.reduce((s, r) => s + r.qtySold, 0)}</td>
+                        <td className="px-4 py-3 text-[var(--color-primary)]">{formatCurrency(cafeItemSalesSummary.reduce((s, r) => s + r.grossValue, 0))}</td>
+                        <td className="px-4 py-3 text-[var(--color-text-muted)]">{new Set(cafeItemSalesFiltered.map((r) => r.orderId)).size}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Detail rows */}
+              {cafeItemSalesFiltered.length > 0 && (
+                <details className="group/detail">
+                  <summary className="cursor-pointer list-none flex items-center gap-2 text-xs font-black uppercase tracking-widest text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors py-1">
+                    <ChevronDown className="w-3.5 h-3.5 group-open/detail:rotate-180 transition-transform" />
+                    Order line detail ({cafeItemSalesFiltered.length} rows)
+                  </summary>
+                  <div className="mt-3 overflow-x-auto rounded-[16px] border border-[var(--color-border)]">
+                    <table className="min-w-[700px] w-full text-xs">
+                      <thead className="bg-[var(--color-bg-secondary)] text-left">
+                        <tr>
+                          {['Order ID', 'Item', 'Qty', 'Line Total', 'Service Mode', 'Payment', 'Completed At'].map((col) => (
+                            <th key={col} className="px-3 py-2.5 font-semibold text-[var(--color-text-muted)] whitespace-nowrap">{col}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cafeItemSalesFiltered.map((row, idx) => (
+                          <tr key={`${row.orderId}-${idx}`} className="border-t border-[var(--color-border)] hover:bg-[var(--color-bg-secondary)]/30 transition-colors">
+                            <td className="px-3 py-2 font-black">{row.orderId.slice(-8).toUpperCase()}</td>
+                            <td className="px-3 py-2 font-medium">{row.itemName}</td>
+                            <td className="px-3 py-2">{row.quantity}</td>
+                            <td className="px-3 py-2 font-bold text-[var(--color-primary)]">{formatCurrency(row.lineTotal)}</td>
+                            <td className="px-3 py-2 capitalize">{row.serviceMode.replace('_', ' ')}</td>
+                            <td className="px-3 py-2 capitalize">{row.paymentChoice.replace('_', ' ')}</td>
+                            <td className="px-3 py-2 text-[var(--color-text-muted)]">{row.completedAt ? formatDateTime(row.completedAt) : '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
+              )}
+            </div>
+          </details>
+
+          {/* Cafe Order Audit — collapsible */}
+          <details className="group rounded-[24px] border border-[var(--color-border)] bg-white overflow-hidden">
+            <summary className="px-5 py-4 border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)]/40 cursor-pointer list-none flex items-center justify-between hover:bg-[var(--color-bg-secondary)] transition-colors">
+              <div>
+                <h3 className="text-lg font-serif">Included-Order Audit</h3>
+                <p className="text-xs font-semibold text-[var(--color-text-muted)] mt-0.5">Shows exactly which orders are collectible today and which are excluded</p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-xs font-bold text-[var(--color-text-muted)] bg-[var(--color-border)] px-2.5 py-1 rounded-full">{cafeDisplayAuditRows.length} orders</span>
+                <ChevronDown className="w-4 h-4 text-[var(--color-text-muted)] group-open:rotate-180 transition-transform duration-200" />
+              </div>
+            </summary>
             <div className="overflow-x-auto">
               <table className="min-w-[1250px] w-full text-sm">
                 <thead className="bg-[var(--color-bg-secondary)] text-left">
                   <tr>
-                    <th className="px-3 py-2">Order ID</th>
-                    <th className="px-3 py-2">Date/Time</th>
-                    <th className="px-3 py-2">Customer</th>
-                    <th className="px-3 py-2">Service Area</th>
-                    <th className="px-3 py-2">Service Mode</th>
-                    <th className="px-3 py-2">Status</th>
-                    <th className="px-3 py-2">Total</th>
-                    <th className="px-3 py-2">Treatment</th>
-                    <th className="px-3 py-2">Collectible?</th>
-                    <th className="px-3 py-2">Action</th>
-                    <th className="px-3 py-2">Exclusion Reason</th>
+                    {['Order ID','Date/Time','Customer','Service Area','Service Mode','Status','Total','Treatment','Collectible?','Action','Exclusion Reason'].map(col => (
+                      <th key={col} className="px-3 py-3 text-xs font-semibold text-[var(--color-text-muted)] whitespace-nowrap">{col}</th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
                   {cafeDisplayAuditRows.length === 0 && (
-                    <tr><td colSpan={10} className="px-3 py-6 text-center text-[var(--color-text-muted)]">No orders found for this business date.</td></tr>
+                    <tr><td colSpan={11} className="px-3 py-8 text-center text-[var(--color-text-muted)] italic text-sm">No orders found for this business date.</td></tr>
                   )}
                   {cafeDisplayAuditRows.map((row) => (
-                    <tr key={row.orderId} className="border-t border-[var(--color-border)]">
-                      <td className="px-3 py-2 font-medium">{row.orderId}</td>
-                      <td className="px-3 py-2">{row.date ? formatDateTime(row.date) : 'Unknown'}</td>
-                      <td className="px-3 py-2">{row.customerName || 'Walk-in'}</td>
-                      <td className="px-3 py-2 uppercase text-xs">{row.serviceArea}</td>
-                      <td className="px-3 py-2">{row.serviceMode}</td>
-                      <td className="px-3 py-2">{row.status}</td>
-                      <td className="px-3 py-2">{formatCurrency(row.total)}</td>
-                      <td className="px-3 py-2 capitalize">{row.treatment.replace('_', ' ')}</td>
-                      <td className={`px-3 py-2 font-semibold ${row.includedInCollectibleCash ? 'text-green-700' : 'text-[var(--color-text-muted)]'}`}>
-                        {row.includedInCollectibleCash ? 'Yes' : 'No'}
+                    <tr key={row.orderId} className="border-t border-[var(--color-border)] hover:bg-[var(--color-bg-secondary)]/30 transition-colors">
+                      <td className="px-3 py-2.5 font-black text-xs">{row.orderId}</td>
+                      <td className="px-3 py-2.5 text-xs">{row.date ? formatDateTime(row.date) : 'Unknown'}</td>
+                      <td className="px-3 py-2.5 font-medium text-xs">
+                        <span>{row.customerName || 'Walk-in'}</span>
+                        {row.orderEntryMode === 'staff_assisted' && row.createdByStaffName && (
+                          <p className="text-[9px] text-[var(--color-primary)]/70 font-black uppercase tracking-wider mt-0.5">via {row.createdByStaffName}</p>
+                        )}
                       </td>
-                      <td className="px-3 py-2">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedAccountingOrderId(row.orderId)}
-                          disabled={row.serviceArea !== 'cafe'}
-                          className="rounded border border-[var(--color-border)] px-2 py-1 text-xs font-semibold disabled:opacity-50"
-                        >
-                          Edit Treatment
+                      <td className="px-3 py-2.5"><span className="text-[9px] font-black uppercase tracking-widest bg-[var(--color-bg-secondary)] border border-[var(--color-border)] px-2 py-0.5 rounded-full">{row.serviceArea}</span></td>
+                      <td className="px-3 py-2.5 text-xs capitalize">{row.serviceMode}</td>
+                      <td className="px-3 py-2.5 text-xs">{row.status}</td>
+                      <td className="px-3 py-2.5 font-black text-xs">{formatCurrency(row.total)}</td>
+                      <td className="px-3 py-2.5 capitalize text-xs">{row.treatment.replace('_', ' ')}</td>
+                      <td className={`px-3 py-2.5 text-xs font-black ${row.includedInCollectibleCash ? 'text-emerald-700' : 'text-[var(--color-text-muted)]'}`}>
+                        {row.includedInCollectibleCash ? '✓ Yes' : 'No'}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <button type="button" onClick={() => setSelectedAccountingOrderId(row.orderId)} disabled={row.serviceArea !== 'cafe' || (cafeStatusClosed && currentUser?.role !== 'admin')}
+                          className="rounded-full bg-[var(--color-bg-secondary)] border border-[var(--color-border)] px-3 py-1 text-xs font-bold disabled:opacity-40 hover:border-[var(--color-primary)] hover:text-[var(--color-primary)] transition-colors">
+                          Edit
                         </button>
                       </td>
-                      <td className="px-3 py-2 text-[var(--color-text-muted)]">{row.exclusionReason || '—'}</td>
+                      <td className="px-3 py-2.5 text-xs text-[var(--color-text-muted)]">{row.exclusionReason || '—'}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          </section>
+          </details>
 
           {renderAccountingEditorPanel('cafe', cafeDisplayAuditRows)}
 
-          <section className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={handleOpenCafeDay}
-              disabled={!canEditCafe || busy || !!cafeReconciliation}
-              className="rounded-xl bg-[var(--color-primary)] text-white px-4 py-2 text-sm font-semibold disabled:opacity-50"
-            >
-              {busy ? <Loader2 className="w-4 h-4 animate-spin inline" /> : null} Open Day
+          {/* Cafe action bar */}
+          <section className="rounded-[24px] border border-[var(--color-border)] bg-[var(--color-bg-secondary)]/40 p-4 flex flex-wrap gap-3 items-center">
+            {canManageCafeLifecycle && (
+              <button type="button" onClick={handleOpenCafeDay} disabled={busy || !!cafeReconciliation}
+                className="flex items-center gap-2 rounded-[20px] bg-[var(--color-primary)] text-white px-6 py-3 text-xs font-black uppercase tracking-[0.2em] shadow-lg shadow-[var(--color-primary)]/10 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Open Day
+              </button>
+            )}
+            <button type="button" onClick={handleSaveCafeDraft} disabled={!canEditCafe || busy || cafeStatusClosed || !cafeReconciliation}
+              className="flex items-center gap-2 rounded-[20px] border-2 border-[var(--color-border)] bg-white px-6 py-3 text-xs font-black uppercase tracking-[0.2em] active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed hover:border-[var(--color-primary)] hover:text-[var(--color-primary)]">
+              <Save className="w-4 h-4" /> Save Draft
             </button>
-            <button
-              type="button"
-              onClick={handleSaveCafeDraft}
-              disabled={!canEditCafe || busy || cafeStatusClosed}
-              className="rounded-xl border border-[var(--color-border)] bg-white px-4 py-2 text-sm font-semibold disabled:opacity-50"
-            >
-              <Save className="w-4 h-4 inline mr-1" /> Save Draft
-            </button>
-            <button
-              type="button"
-              onClick={handleCloseCafeDay}
-              disabled={!canEditCafe || busy || cafeStatusClosed}
-              className="rounded-xl bg-emerald-600 text-white px-4 py-2 text-sm font-semibold disabled:opacity-50"
-            >
-              <ClipboardCheck className="w-4 h-4 inline mr-1" /> Close Day
-            </button>
+            {canManageCafeLifecycle && (
+              <>
+                <button type="button" onClick={handleCloseCafeDay} disabled={busy || cafeStatusClosed || !cafeReconciliation}
+                  className="flex items-center gap-2 rounded-[20px] bg-emerald-600 text-white px-6 py-3 text-xs font-black uppercase tracking-[0.2em] shadow-lg shadow-emerald-200 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                  <ClipboardCheck className="w-4 h-4" /> Close Day
+                </button>
+                {cafeStatusClosed && (
+                  <button type="button" onClick={handleReopenCafeDay} disabled={busy || !cafeReconciliation}
+                    className="flex items-center gap-2 rounded-[20px] bg-amber-600 text-white px-6 py-3 text-xs font-black uppercase tracking-[0.2em] shadow-lg shadow-amber-200 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                    Reopen Day
+                  </button>
+                )}
+              </>
+            )}
+            {!canManageCafeLifecycle && (
+              <p className="text-xs font-semibold text-[var(--color-text-muted)]">Accountant mode: value updates only. Day open/close/reopen is admin-managed.</p>
+            )}
           </section>
         </>
       )}

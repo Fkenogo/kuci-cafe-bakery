@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, doc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore';
-import { AlertCircle, ChevronDown, ChevronRight, Copy, Eye, EyeOff, Loader2, Plus, Save, Trash2, X } from 'lucide-react';
+import { collection, deleteDoc, doc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore';
+import { AlertCircle, Archive, ChevronDown, ChevronRight, Copy, Eye, EyeOff, Loader2, Plus, Save, Search, Trash2, X } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { importCanonicalMenuFromSource } from '../lib/menuImport';
 import { seedFirestore } from '../lib/seed';
@@ -230,6 +230,7 @@ export const AdminCatalogView: React.FC<AdminCatalogViewProps> = ({ isAdmin }) =
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [categoryActionFocusId, setCategoryActionFocusId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
 
@@ -241,6 +242,7 @@ export const AdminCatalogView: React.FC<AdminCatalogViewProps> = ({ isAdmin }) =
   const [categorySearch, setCategorySearch] = useState('');
   const [itemSearch, setItemSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
 
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
@@ -259,6 +261,18 @@ export const AdminCatalogView: React.FC<AdminCatalogViewProps> = ({ isAdmin }) =
   const [seeding, setSeeding] = useState(false);
   const [importing, setImporting] = useState(false);
   const showImageUrlHint = looksLikeNonDirectImageUrl(itemForm.imageUrl);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timeout = window.setTimeout(() => setNotice(null), 5000);
+    return () => window.clearTimeout(timeout);
+  }, [notice]);
+
+  useEffect(() => {
+    if (!error) return;
+    const timeout = window.setTimeout(() => setError(null), 7000);
+    return () => window.clearTimeout(timeout);
+  }, [error]);
 
   useEffect(() => {
     if (!isAdmin) {
@@ -322,12 +336,21 @@ export const AdminCatalogView: React.FC<AdminCatalogViewProps> = ({ isAdmin }) =
   const filteredItems = useMemo(() => {
     return activeItems.filter((item) => {
       const categoryId = mode === 'cafe' ? (item as MenuItem).categoryId : (item as BakeryItem).bakeryCategoryId;
+      if (categoryFilter && categoryId !== categoryFilter) return false;
       const hay = `${item.name} ${item.slug || ''} ${categoryId || ''} ${(item as MenuItem).sku || ''}`.toLowerCase();
       const matchesSearch = hay.includes(itemSearch.toLowerCase().trim());
       const matchesActive = activeFilter === 'all' || (activeFilter === 'active' ? item.active : !item.active);
       return matchesSearch && matchesActive;
     });
-  }, [activeItems, itemSearch, activeFilter, mode]);
+  }, [activeItems, itemSearch, activeFilter, mode, categoryFilter]);
+
+  useEffect(() => {
+    if (!categoryActionFocusId) return;
+    const linkedCount = categoryItemCounts[categoryActionFocusId] || 0;
+    if (linkedCount > 0) return;
+    setError(null);
+    setCategoryActionFocusId(null);
+  }, [categoryActionFocusId, categoryItemCounts]);
 
   const currentCategoryName = (id: string): string => {
     const category = activeCategories.find((entry) => entry.id === id);
@@ -420,6 +443,9 @@ export const AdminCatalogView: React.FC<AdminCatalogViewProps> = ({ isAdmin }) =
   };
 
   const openCreateCategoryEditor = () => {
+    setError(null);
+    setNotice(null);
+    setCategoryActionFocusId(null);
     setEditor({ open: true, mode, editorType: 'category', editorMode: 'create', id: null });
     setCategoryForm(emptyCategoryForm(mode));
     setSelectedCategoryId(null);
@@ -429,6 +455,9 @@ export const AdminCatalogView: React.FC<AdminCatalogViewProps> = ({ isAdmin }) =
   };
 
   const openEditCategoryEditor = (category: MenuCategory | BakeryCategory) => {
+    setError(null);
+    setNotice(null);
+    setCategoryActionFocusId(null);
     setEditor({ open: true, mode, editorType: 'category', editorMode: 'edit', id: category.id });
     setSelectedCategoryId(category.id);
     setCategoryForm({
@@ -451,6 +480,9 @@ export const AdminCatalogView: React.FC<AdminCatalogViewProps> = ({ isAdmin }) =
   };
 
   const openCreateItemEditor = () => {
+    setError(null);
+    setNotice(null);
+    setCategoryActionFocusId(null);
     setEditor({ open: true, mode, editorType: 'item', editorMode: 'create', id: null });
     setItemForm(emptyItemForm(mode));
     setSelectedItemId(null);
@@ -463,6 +495,9 @@ export const AdminCatalogView: React.FC<AdminCatalogViewProps> = ({ isAdmin }) =
   };
 
   const openEditItemEditor = (item: MenuItem | BakeryItem) => {
+    setError(null);
+    setNotice(null);
+    setCategoryActionFocusId(null);
     if (mode === 'cafe') {
       const menuItem = item as MenuItem;
       setItemForm({
@@ -700,7 +735,7 @@ export const AdminCatalogView: React.FC<AdminCatalogViewProps> = ({ isAdmin }) =
         hiddenFromCustomer: targetHidden,
         updatedAt: serverTimestamp(),
       }), { merge: true });
-    }, `${targetHidden ? 'Hidden' : 'Shown'} ${entry.name}.`);
+    }, `${targetHidden ? 'Hidden' : 'Visible'} ${entry.name}.`);
   };
 
   const toggleItemHidden = async (entry: MenuItem | BakeryItem, targetHidden: boolean) => {
@@ -711,17 +746,20 @@ export const AdminCatalogView: React.FC<AdminCatalogViewProps> = ({ isAdmin }) =
         hiddenFromCustomer: targetHidden,
         updatedAt: serverTimestamp(),
       }), { merge: true });
-    }, `${targetHidden ? 'Hidden' : 'Shown'} ${entry.name}.`);
+    }, `${targetHidden ? 'Hidden' : 'Visible'} ${entry.name}.`);
   };
 
   const archiveCategory = async (category: MenuCategory | BakeryCategory) => {
     const linkedCount = categoryItemCounts[category.id] || 0;
     if (linkedCount > 0) {
-      setError(`Cannot archive "${category.name}" while ${linkedCount} linked items still exist. Move or archive linked items first.`);
+      setNotice(null);
+      setCategoryActionFocusId(category.id);
+      setError('Cannot archive this category because it contains active items. Move, hide, or delete those items first.');
       return;
     }
 
     await runSave(async () => {
+      setCategoryActionFocusId(null);
       const collectionName = mode === 'cafe' ? 'categories' : 'bakeryCategories';
       await setDoc(doc(db, collectionName, category.id), stripUndefinedDeep({
         active: false,
@@ -751,7 +789,45 @@ export const AdminCatalogView: React.FC<AdminCatalogViewProps> = ({ isAdmin }) =
     }, `Archived ${item.name}.`);
   };
 
+  const deleteCategory = async (category: MenuCategory | BakeryCategory) => {
+    const linkedCount = categoryItemCounts[category.id] || 0;
+    if (linkedCount > 0) {
+      setNotice(null);
+      setCategoryActionFocusId(category.id);
+      setError(
+        'Cannot delete category while linked items still exist. Delete, move, or archive linked items first.'
+      );
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Permanently delete category "${category.name}"? This removes the document from Firestore and cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    await runSave(async () => {
+      setCategoryActionFocusId(null);
+      const collectionName = mode === 'cafe' ? 'categories' : 'bakeryCategories';
+      await deleteDoc(doc(db, collectionName, category.id));
+    }, `Deleted category ${category.name}.`);
+  };
+
+  const deleteItem = async (item: MenuItem | BakeryItem) => {
+    const confirmed = window.confirm(
+      `Permanently delete item "${item.name}"? This removes the document from Firestore and cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    await runSave(async () => {
+      const collectionName = mode === 'cafe' ? 'menu' : 'bakeryItems';
+      await deleteDoc(doc(db, collectionName, item.id));
+    }, `Deleted item ${item.name}.`);
+  };
+
   const duplicateItem = (item: MenuItem | BakeryItem) => {
+    setError(null);
+    setNotice(null);
+    setCategoryActionFocusId(null);
     setEditor({ open: true, mode, editorType: 'item', editorMode: 'create', id: null });
     setItemSlugTouched(false);
     setSelectedItemId(item.id);
@@ -909,6 +985,7 @@ export const AdminCatalogView: React.FC<AdminCatalogViewProps> = ({ isAdmin }) =
     if (!window.confirm('Run seed data update now? This writes demo catalog records to Firestore.')) return;
     setSeeding(true);
     setError(null);
+    setNotice(null);
     const result = await seedFirestore();
     setSeeding(false);
     if (result.success) {
@@ -922,6 +999,7 @@ export const AdminCatalogView: React.FC<AdminCatalogViewProps> = ({ isAdmin }) =
     if (!window.confirm('Import canonical menu now? This updates menu and categories from source data.')) return;
     setImporting(true);
     setError(null);
+    setNotice(null);
     const result = await importCanonicalMenuFromSource();
     setImporting(false);
     if (result.success) {
@@ -950,29 +1028,36 @@ export const AdminCatalogView: React.FC<AdminCatalogViewProps> = ({ isAdmin }) =
         <p className="text-sm text-[var(--color-text-muted)]">Manage customer-facing and operational catalog records without editing Firestore directly.</p>
       </header>
 
-      <section className="rounded-[24px] border border-[var(--color-border)] bg-white p-3 flex flex-wrap items-center gap-2">
+      <div className="flex items-center gap-2">
+        <nav className="flex gap-1 rounded-[20px] border border-[var(--color-border)] bg-[var(--color-bg-secondary)]/40 p-1 flex-1">
+          {([
+            { key: 'cafe' as CatalogMode, label: 'Cafe Menu', count: menuItems.length },
+            { key: 'bakery' as CatalogMode, label: 'Bakery Catalog', count: bakeryItems.length },
+          ]).map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => { setMode(tab.key); setCategoryFilter(null); setCategorySearch(''); setItemSearch(''); }}
+              className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-[16px] text-[11px] font-black uppercase tracking-widest transition-all ${
+                mode === tab.key
+                  ? 'bg-[var(--color-primary)] text-white shadow-sm'
+                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'
+              }`}
+            >
+              {tab.label}
+              <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-black ${
+                mode === tab.key ? 'bg-white/25 text-white' : 'bg-[var(--color-border)] text-[var(--color-text-muted)]'
+              }`}>{tab.count}</span>
+            </button>
+          ))}
+        </nav>
         <button
-          onClick={() => setMode('cafe')}
-          className={`rounded-full px-4 py-2 text-xs font-black uppercase tracking-widest ${mode === 'cafe' ? 'bg-[var(--color-primary)] text-white' : 'border border-[var(--color-border)]'}`}
+          onClick={() => setShowTools((prev) => !prev)}
+          className="inline-flex items-center gap-1 rounded-[16px] border border-[var(--color-border)] bg-white px-3 py-2.5 text-xs font-bold uppercase tracking-wider"
         >
-          Cafe Menu
+          {showTools ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+          Tools
         </button>
-        <button
-          onClick={() => setMode('bakery')}
-          className={`rounded-full px-4 py-2 text-xs font-black uppercase tracking-widest ${mode === 'bakery' ? 'bg-[var(--color-primary)] text-white' : 'border border-[var(--color-border)]'}`}
-        >
-          Bakery Catalog
-        </button>
-        <div className="ml-auto">
-          <button
-            onClick={() => setShowTools((prev) => !prev)}
-            className="inline-flex items-center gap-1 rounded-full border border-[var(--color-border)] px-3 py-1 text-xs font-bold uppercase tracking-wider"
-          >
-            {showTools ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-            Tools
-          </button>
-        </div>
-      </section>
+      </div>
 
       {showTools && (
         <section className="rounded-[24px] border border-[var(--color-border)] bg-white p-4 space-y-2">
@@ -999,33 +1084,41 @@ export const AdminCatalogView: React.FC<AdminCatalogViewProps> = ({ isAdmin }) =
         </section>
       )}
 
-      <section className="rounded-[24px] border border-[var(--color-border)] bg-white p-4 grid gap-3 md:grid-cols-3">
-        <label className="space-y-1">
-          <span className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">Search Categories</span>
-          <input value={categorySearch} onChange={(event) => setCategorySearch(event.target.value)} className="w-full rounded-[12px] border border-[var(--color-border)] px-3 py-2 text-sm" />
-        </label>
-        <label className="space-y-1">
-          <span className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">Search Items</span>
-          <input value={itemSearch} onChange={(event) => setItemSearch(event.target.value)} className="w-full rounded-[12px] border border-[var(--color-border)] px-3 py-2 text-sm" />
-        </label>
-        <label className="space-y-1">
-          <span className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">Status</span>
-          <select value={activeFilter} onChange={(event) => setActiveFilter(event.target.value as typeof activeFilter)} className="w-full rounded-[12px] border border-[var(--color-border)] px-3 py-2 text-sm">
-            <option value="all">All</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-          </select>
-        </label>
-      </section>
 
       {error && (
         <div className="rounded-[20px] border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-center gap-2">
           <AlertCircle className="w-4 h-4" />
-          {error}
+          <span className="flex-1">{error}</span>
+          {categoryActionFocusId ? (
+            <button
+              onClick={() => {
+                setSelectedCategoryId(categoryActionFocusId);
+                setItemSearch(currentCategoryName(categoryActionFocusId));
+                setError(null);
+              }}
+              className="text-xs font-black uppercase tracking-wider rounded-full border border-red-300 px-2 py-1"
+            >
+              View Items in this Category
+            </button>
+          ) : null}
+          <button
+            onClick={() => setError(null)}
+            className="text-xs font-black uppercase tracking-wider rounded-full border border-red-300 px-2 py-1"
+          >
+            Dismiss
+          </button>
         </div>
       )}
       {notice && (
-        <div className="rounded-[20px] border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">{notice}</div>
+        <div className="rounded-[20px] border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700 flex items-center gap-2">
+          <span className="flex-1">{notice}</span>
+          <button
+            onClick={() => setNotice(null)}
+            className="text-xs font-black uppercase tracking-wider rounded-full border border-green-300 px-2 py-1"
+          >
+            Dismiss
+          </button>
+        </div>
       )}
 
       {loading ? (
@@ -1037,29 +1130,44 @@ export const AdminCatalogView: React.FC<AdminCatalogViewProps> = ({ isAdmin }) =
         <div className="grid gap-6 lg:grid-cols-2">
           <section className="rounded-[24px] border border-[var(--color-border)] bg-white p-4 space-y-3">
             <div className="flex items-center justify-between gap-3">
-              <h3 className="text-lg font-serif">{mode === 'cafe' ? 'Cafe Categories' : 'Bakery Categories'}</h3>
+              <h3 className="text-lg font-serif">{mode === 'cafe' ? 'Categories' : 'Bakery Categories'}</h3>
               <button
                 onClick={openCreateCategoryEditor}
-                className="inline-flex items-center gap-1 rounded-full border border-[var(--color-border)] px-3 py-1 text-xs font-bold uppercase tracking-wider"
+                className="inline-flex items-center gap-1 rounded-full bg-[var(--color-primary)] text-white px-3 py-1.5 text-xs font-bold uppercase tracking-wider"
               >
                 <Plus className="w-3 h-3" />
-                New Category
+                New
               </button>
+            </div>
+
+            <div className="flex gap-2">
+              <div className="flex-1 flex items-center gap-2 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5">
+                <Search className="w-3.5 h-3.5 text-[var(--color-text-muted)] shrink-0" />
+                <input value={categorySearch} onChange={(event) => setCategorySearch(event.target.value)} placeholder="Search categories…" className="w-full bg-transparent py-2 text-sm outline-none" />
+              </div>
+              <select value={activeFilter} onChange={(event) => setActiveFilter(event.target.value as typeof activeFilter)} className="rounded-[12px] border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-2 text-xs font-semibold">
+                <option value="all">All</option>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
             </div>
 
             <div className="space-y-2 max-h-[460px] overflow-y-auto pr-1">
               {filteredCategories.map((category) => {
                 const isSelected = selectedCategoryId === category.id;
+                const isFiltered = categoryFilter === category.id;
                 return (
-                  <article key={category.id} className={`rounded-[16px] border px-3 py-3 space-y-2 ${isSelected ? 'border-[var(--color-primary)] ring-2 ring-[var(--color-primary)]/15' : 'border-[var(--color-border)]'}`}>
+                  <article key={category.id} className={`rounded-[16px] border px-3 py-3 space-y-2 cursor-pointer transition-all ${isFiltered ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/5 ring-2 ring-[var(--color-primary)]/15' : isSelected ? 'border-[var(--color-primary)]/50' : 'border-[var(--color-border)] hover:border-[var(--color-primary)]/30'}`}
+                    onClick={() => setCategoryFilter(isFiltered ? null : category.id)}
+                  >
                     <div className="flex items-center justify-between gap-2">
                       <div>
-                        <p className="font-semibold">{category.name}</p>
+                        <p className="font-semibold flex items-center gap-1.5">{category.name} {isFiltered && <span className="text-[9px] font-black uppercase tracking-widest text-[var(--color-primary)]">▶ filtering</span>}</p>
                         {category.description ? <p className="text-xs text-[var(--color-text-muted)]">{category.description}</p> : null}
                       </div>
                       <div className="flex gap-1">
                         <span className={`px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${category.active ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-700'}`}>{category.active ? 'active' : 'inactive'}</span>
-                        <span className={`px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${category.hiddenFromCustomer ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>{category.hiddenFromCustomer ? 'hidden' : 'shown'}</span>
+                        <span className={`px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${category.hiddenFromCustomer ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>{category.hiddenFromCustomer ? 'hidden' : 'visible'}</span>
                       </div>
                     </div>
 
@@ -1076,7 +1184,9 @@ export const AdminCatalogView: React.FC<AdminCatalogViewProps> = ({ isAdmin }) =
                         {category.hiddenFromCustomer ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
                         {category.hiddenFromCustomer ? 'Show' : 'Hide'}
                       </button>
-                      <button onClick={() => void archiveCategory(category)} className="inline-flex items-center gap-1 rounded-full border border-red-200 text-red-700 px-3 py-1 text-[10px] font-black uppercase tracking-wider"><Trash2 className="w-3 h-3" />Archive</button>
+                      <button onClick={() => void archiveCategory(category)} className="inline-flex items-center gap-1 rounded-full border border-[var(--color-border)] text-[var(--color-text-muted)] px-3 py-1 text-[10px] font-black uppercase tracking-wider"><Archive className="w-3 h-3" />Archive</button>
+                      <span className="text-[var(--color-border)]">|</span>
+                      <button onClick={() => void deleteCategory(category)} className="inline-flex items-center gap-1 rounded-full border border-red-400 bg-red-50 text-red-800 px-3 py-1 text-[10px] font-black uppercase tracking-wider"><Trash2 className="w-3 h-3" />Delete</button>
                     </div>
                   </article>
                 );
@@ -1090,14 +1200,31 @@ export const AdminCatalogView: React.FC<AdminCatalogViewProps> = ({ isAdmin }) =
 
           <section className="rounded-[24px] border border-[var(--color-border)] bg-white p-4 space-y-3">
             <div className="flex items-center justify-between gap-3">
-              <h3 className="text-lg font-serif">{mode === 'cafe' ? 'Cafe Items' : 'Bakery Items'}</h3>
+              <div>
+                <h3 className="text-lg font-serif">{mode === 'cafe' ? 'Items' : 'Bakery Items'}</h3>
+                {categoryFilter && (
+                  <button
+                    onClick={() => setCategoryFilter(null)}
+                    className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-[var(--color-primary)] mt-0.5"
+                  >
+                    <X className="w-3 h-3" />
+                    {currentCategoryName(categoryFilter)} · {filteredItems.length} items
+                  </button>
+                )}
+              </div>
               <button
                 onClick={openCreateItemEditor}
-                className="inline-flex items-center gap-1 rounded-full border border-[var(--color-border)] px-3 py-1 text-xs font-bold uppercase tracking-wider"
+                className="inline-flex items-center gap-1 rounded-full bg-[var(--color-primary)] text-white px-3 py-1.5 text-xs font-bold uppercase tracking-wider"
               >
                 <Plus className="w-3 h-3" />
-                New Item
+                New
               </button>
+            </div>
+
+            <div className="flex items-center gap-2 rounded-[12px] border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5">
+              <Search className="w-3.5 h-3.5 text-[var(--color-text-muted)] shrink-0" />
+              <input value={itemSearch} onChange={(event) => setItemSearch(event.target.value)} placeholder={categoryFilter ? `Search in ${currentCategoryName(categoryFilter)}…` : 'Search items…'} className="w-full bg-transparent py-2 text-sm outline-none" />
+              {itemSearch && <button onClick={() => setItemSearch('')} className="text-[var(--color-text-muted)]"><X className="w-3.5 h-3.5" /></button>}
             </div>
 
             <div className="space-y-2 max-h-[460px] overflow-y-auto pr-1">
@@ -1116,7 +1243,7 @@ export const AdminCatalogView: React.FC<AdminCatalogViewProps> = ({ isAdmin }) =
                       </div>
                       <div className="flex gap-1">
                         <span className={`px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${item.active ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-700'}`}>{item.active ? 'active' : 'inactive'}</span>
-                        <span className={`px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${item.hiddenFromCustomer ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>{item.hiddenFromCustomer ? 'hidden' : 'shown'}</span>
+                        <span className={`px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${item.hiddenFromCustomer ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>{item.hiddenFromCustomer ? 'hidden' : 'visible'}</span>
                         {mode === 'cafe' && (
                           <span className={`px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${(typedItem as MenuItem).isAvailable ? 'bg-emerald-100 text-emerald-700' : 'bg-orange-100 text-orange-700'}`}>
                             {(typedItem as MenuItem).isAvailable ? 'available now' : 'unavailable now'}
@@ -1140,7 +1267,9 @@ export const AdminCatalogView: React.FC<AdminCatalogViewProps> = ({ isAdmin }) =
                         {item.hiddenFromCustomer ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
                         {item.hiddenFromCustomer ? 'Show' : 'Hide'}
                       </button>
-                      <button onClick={() => void archiveItem(item)} className="inline-flex items-center gap-1 rounded-full border border-red-200 text-red-700 px-3 py-1 text-[10px] font-black uppercase tracking-wider"><Trash2 className="w-3 h-3" />Archive</button>
+                      <button onClick={() => void archiveItem(item)} className="inline-flex items-center gap-1 rounded-full border border-[var(--color-border)] text-[var(--color-text-muted)] px-3 py-1 text-[10px] font-black uppercase tracking-wider"><Archive className="w-3 h-3" />Archive</button>
+                      <span className="text-[var(--color-border)]">|</span>
+                      <button onClick={() => void deleteItem(item)} className="inline-flex items-center gap-1 rounded-full border border-red-400 bg-red-50 text-red-800 px-3 py-1 text-[10px] font-black uppercase tracking-wider"><Trash2 className="w-3 h-3" />Delete</button>
                       <button onClick={() => duplicateItem(item)} className="inline-flex items-center gap-1 rounded-full border border-[var(--color-border)] px-3 py-1 text-[10px] font-black uppercase tracking-wider"><Copy className="w-3 h-3" />Duplicate</button>
                     </div>
                   </article>
@@ -1223,7 +1352,7 @@ export const AdminCatalogView: React.FC<AdminCatalogViewProps> = ({ isAdmin }) =
 
                     <div className="grid grid-cols-2 gap-2 items-end">
                       <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={categoryForm.active} onChange={(event) => setCategoryForm((prev) => ({ ...prev, active: event.target.checked }))} /> Active in system</label>
-                      <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={!categoryForm.hiddenFromCustomer} onChange={(event) => setCategoryForm((prev) => ({ ...prev, hiddenFromCustomer: !event.target.checked }))} /> Shown to customers</label>
+                      <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={!categoryForm.hiddenFromCustomer} onChange={(event) => setCategoryForm((prev) => ({ ...prev, hiddenFromCustomer: !event.target.checked }))} /> Visible to customers</label>
                     </div>
                   </section>
 
@@ -1289,10 +1418,16 @@ export const AdminCatalogView: React.FC<AdminCatalogViewProps> = ({ isAdmin }) =
                   </section>
 
                   {editor.editorMode === 'edit' && (
-                    <button onClick={() => void archiveCategory((editor.mode === 'cafe' ? categories : bakeryCategories).find((entry) => entry.id === categoryForm.id) as MenuCategory | BakeryCategory)} className="inline-flex items-center gap-2 rounded-full border border-red-200 text-red-700 px-4 py-2 text-xs font-black uppercase tracking-wider">
-                      <Trash2 className="w-3 h-3" />
-                      Archive Category
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      <button onClick={() => void archiveCategory((editor.mode === 'cafe' ? categories : bakeryCategories).find((entry) => entry.id === categoryForm.id) as MenuCategory | BakeryCategory)} className="inline-flex items-center gap-2 rounded-full border border-[var(--color-border)] text-[var(--color-text-muted)] px-4 py-2 text-xs font-black uppercase tracking-wider">
+                        <Archive className="w-3 h-3" />
+                        Archive Category
+                      </button>
+                      <button onClick={() => void deleteCategory((editor.mode === 'cafe' ? categories : bakeryCategories).find((entry) => entry.id === categoryForm.id) as MenuCategory | BakeryCategory)} className="inline-flex items-center gap-2 rounded-full border border-red-300 text-red-700 px-4 py-2 text-xs font-black uppercase tracking-wider">
+                        <Trash2 className="w-3 h-3" />
+                        Delete Category
+                      </button>
+                    </div>
                   )}
                 </>
               ) : (
@@ -1341,11 +1476,14 @@ export const AdminCatalogView: React.FC<AdminCatalogViewProps> = ({ isAdmin }) =
                   </section>
 
                   <section className="space-y-3">
-                    <h4 className="text-sm font-black uppercase tracking-widest text-[var(--color-text-muted)]">Section B: Customer Availability</h4>
+                    <h4 className="text-sm font-black uppercase tracking-widest text-[var(--color-text-muted)]">Item Status</h4>
+                    <p className="text-xs text-[var(--color-text-muted)]">
+                      Active: Item exists in system. Available: Item can be ordered right now. Visible: Item is shown to customers.
+                    </p>
                     <div className="grid gap-2 md:grid-cols-2">
                       <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={itemForm.active} onChange={(event) => setItemForm((prev) => ({ ...prev, active: event.target.checked }))} /> Active in system</label>
                       {mode === 'cafe' && <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={itemForm.availableNow} onChange={(event) => setItemForm((prev) => ({ ...prev, availableNow: event.target.checked }))} /> Available now</label>}
-                      <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={!itemForm.hiddenFromCustomer} onChange={(event) => setItemForm((prev) => ({ ...prev, hiddenFromCustomer: !event.target.checked }))} /> Shown to customers</label>
+                      <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={!itemForm.hiddenFromCustomer} onChange={(event) => setItemForm((prev) => ({ ...prev, hiddenFromCustomer: !event.target.checked }))} /> Visible to customers</label>
                       {mode === 'cafe' && <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={itemForm.featured} onChange={(event) => setItemForm((prev) => ({ ...prev, featured: event.target.checked }))} /> Featured</label>}
                     </div>
                   </section>
@@ -1543,10 +1681,16 @@ export const AdminCatalogView: React.FC<AdminCatalogViewProps> = ({ isAdmin }) =
                   </section>
 
                   {editor.editorMode === 'edit' && (
-                    <button onClick={() => void archiveItem((mode === 'cafe' ? menuItems : bakeryItems).find((entry) => entry.id === itemForm.id) as MenuItem | BakeryItem)} className="inline-flex items-center gap-2 rounded-full border border-red-200 text-red-700 px-4 py-2 text-xs font-black uppercase tracking-wider">
-                      <Trash2 className="w-3 h-3" />
-                      Archive Item
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      <button onClick={() => void archiveItem((mode === 'cafe' ? menuItems : bakeryItems).find((entry) => entry.id === itemForm.id) as MenuItem | BakeryItem)} className="inline-flex items-center gap-2 rounded-full border border-[var(--color-border)] text-[var(--color-text-muted)] px-4 py-2 text-xs font-black uppercase tracking-wider">
+                        <Archive className="w-3 h-3" />
+                        Archive Item
+                      </button>
+                      <button onClick={() => void deleteItem((mode === 'cafe' ? menuItems : bakeryItems).find((entry) => entry.id === itemForm.id) as MenuItem | BakeryItem)} className="inline-flex items-center gap-2 rounded-full border border-red-300 text-red-700 px-4 py-2 text-xs font-black uppercase tracking-wider">
+                        <Trash2 className="w-3 h-3" />
+                        Delete Item
+                      </button>
+                    </div>
                   )}
                 </>
               )}

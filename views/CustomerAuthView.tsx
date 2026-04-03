@@ -2,6 +2,7 @@ import React from 'react';
 import { auth } from '../lib/firebase';
 import {
   ConfirmationResult,
+  getRedirectResult,
   GoogleAuthProvider,
   RecaptchaVerifier,
   signInWithPhoneNumber,
@@ -15,6 +16,10 @@ interface CustomerAuthViewProps {
   user: User | null;
   onBack: () => void;
   onAuthSuccess: () => void;
+  accessLabel?: string;
+  entryTitle?: string;
+  entryDescription?: string;
+  backLabel?: string;
 }
 
 type AuthScreen = 'entry' | 'phone' | 'otp';
@@ -27,8 +32,17 @@ declare global {
 
 const PHONE_RECATCHA_ID = 'kuci-phone-recaptcha';
 
-export const CustomerAuthView: React.FC<CustomerAuthViewProps> = ({ user, onBack, onAuthSuccess }) => {
+export const CustomerAuthView: React.FC<CustomerAuthViewProps> = ({
+  user,
+  onBack,
+  onAuthSuccess,
+  accessLabel = 'KUCI Staff Access',
+  entryTitle = 'Staff sign in',
+  entryDescription = 'Staff and internal users sign in here to access operations.',
+  backLabel = 'Back to Ordering',
+}) => {
   const [loading, setLoading] = React.useState(false);
+  const [resolvingRedirect, setResolvingRedirect] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [screen, setScreen] = React.useState<AuthScreen>('entry');
   const [phoneNumber, setPhoneNumber] = React.useState('');
@@ -58,9 +72,45 @@ export const CustomerAuthView: React.FC<CustomerAuthViewProps> = ({ user, onBack
 
   React.useEffect(() => {
     if (user) {
+      if (import.meta.env.DEV) {
+        console.debug('[auth] Auth state restored in CustomerAuthView, routing to post-login destination.', { uid: user.uid });
+      }
       onAuthSuccess();
     }
   }, [onAuthSuccess, user]);
+
+  React.useEffect(() => {
+    let isMounted = true;
+    const resolveRedirect = async () => {
+      try {
+        const result = await getRedirectResult(auth);
+        if (!isMounted) return;
+        if (result?.user) {
+          if (import.meta.env.DEV) {
+            console.debug('[auth] Google redirect resolved for user:', result.user.uid);
+          }
+          onAuthSuccess();
+          return;
+        }
+        if (import.meta.env.DEV) {
+          console.debug('[auth] No redirect result user found; continuing with auth chooser.');
+        }
+      } catch (redirectError) {
+        console.error('Error resolving Google redirect sign-in:', redirectError);
+        if (isMounted) {
+          setError('Google sign-in could not be completed. Please try again.');
+        }
+      } finally {
+        if (isMounted) {
+          setResolvingRedirect(false);
+        }
+      }
+    };
+    void resolveRedirect();
+    return () => {
+      isMounted = false;
+    };
+  }, [onAuthSuccess]);
 
   React.useEffect(() => {
     return () => {
@@ -78,12 +128,30 @@ export const CustomerAuthView: React.FC<CustomerAuthViewProps> = ({ user, onBack
     try {
       setLoading(true);
       setError(null);
-      const isMobileViewport = typeof window !== 'undefined' && window.innerWidth < 768;
+      const isMobileViewport = typeof window !== 'undefined' && (
+        window.innerWidth < 768 ||
+        /android|iphone|ipad|ipod|mobile/i.test(window.navigator.userAgent)
+      );
+      if (import.meta.env.DEV) {
+        const authDomain = (auth as { config?: { authDomain?: string } })?.config?.authDomain || 'unknown';
+        console.debug('[auth] Google sign-in method selected:', isMobileViewport ? 'redirect' : 'popup');
+        console.debug('[auth] OAuth context', {
+          authDomain,
+          expectedHandlerUri: `https://${authDomain}/__/auth/handler`,
+          origin: typeof window !== 'undefined' ? window.location.origin : 'server',
+        });
+      }
       if (isMobileViewport) {
+        if (import.meta.env.DEV) {
+          console.debug('[auth] Starting Google redirect sign-in...');
+        }
         await signInWithRedirect(auth, provider);
         return;
       }
       await signInWithPopup(auth, provider);
+      if (import.meta.env.DEV) {
+        console.debug('[auth] Google popup sign-in completed; routing to post-login destination.');
+      }
       onAuthSuccess();
     } catch (signInError) {
       console.error('Error signing in with Google:', signInError);
@@ -153,16 +221,24 @@ export const CustomerAuthView: React.FC<CustomerAuthViewProps> = ({ user, onBack
           className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
         >
           <ArrowLeft className="w-4 h-4" />
-          Back to Home
+          {backLabel}
         </button>
 
         <div className="mt-6 rounded-[28px] border border-[var(--color-border)] bg-white px-5 py-6 shadow-sm">
-          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--color-primary)]">KUCI Access</p>
+          {resolvingRedirect ? (
+            <div className="py-10 text-center space-y-2">
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--color-primary)]">{accessLabel}</p>
+              <h1 className="text-2xl font-serif text-[var(--color-text)]">Finishing sign-in...</h1>
+              <p className="text-sm text-[var(--color-text-muted)]">Please wait while we complete your Google sign-in.</p>
+            </div>
+          ) : (
+            <>
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--color-primary)]">{accessLabel}</p>
           <h1 className="text-2xl font-serif text-[var(--color-text)] mt-2">
-            {screen === 'entry' ? 'Sign in' : screen === 'phone' ? 'Enter phone number' : 'Enter code'}
+            {screen === 'entry' ? entryTitle : screen === 'phone' ? 'Enter phone number' : 'Enter code'}
           </h1>
           <p className="text-sm text-[var(--color-text-muted)] mt-1">
-            {screen === 'entry' && 'Choose how you want to continue.'}
+            {screen === 'entry' && entryDescription}
             {screen === 'phone' && 'We will send a verification code by SMS.'}
             {screen === 'otp' && 'Enter the code we just sent to your phone.'}
           </p>
@@ -272,6 +348,8 @@ export const CustomerAuthView: React.FC<CustomerAuthViewProps> = ({ user, onBack
           </div>
 
           <div id={PHONE_RECATCHA_ID} className="hidden" />
+            </>
+          )}
         </div>
       </div>
     </div>

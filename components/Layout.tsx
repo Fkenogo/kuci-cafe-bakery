@@ -25,6 +25,11 @@ interface LayoutProps {
   onManagementViewModeChange?: (mode: 'auto' | 'mobile' | 'desktop') => void;
   showManagementViewControls?: boolean;
   onOpenSignIn?: () => void;
+  showAdminModeSwitch?: boolean;
+  adminMode?: 'management' | 'customer';
+  onAdminModeChange?: (mode: 'management' | 'customer') => void;
+  showStaffOrderEntryAction?: boolean;
+  onStaffOrderEntry?: () => void;
 }
 
 export const Layout: React.FC<LayoutProps> = ({
@@ -40,6 +45,11 @@ export const Layout: React.FC<LayoutProps> = ({
   onManagementViewModeChange,
   showManagementViewControls = false,
   onOpenSignIn,
+  showAdminModeSwitch = false,
+  adminMode = 'management',
+  onAdminModeChange,
+  showStaffOrderEntryAction = false,
+  onStaffOrderEntry,
 }) => {
   const [isBouncing, setIsBouncing] = useState(false);
   const [isDesktopViewport, setIsDesktopViewport] = useState(false);
@@ -79,6 +89,14 @@ export const Layout: React.FC<LayoutProps> = ({
           </div>
         </div>
         <div className="flex items-center gap-3">
+          {showStaffOrderEntryAction && onStaffOrderEntry && (
+            <button
+              onClick={onStaffOrderEntry}
+              className="inline-flex items-center gap-1 rounded-full border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/10 text-[var(--color-primary)] px-3 py-1.5 text-[10px] font-black uppercase tracking-widest"
+            >
+              Create Order
+            </button>
+          )}
           <Auth user={user} appUser={appUser} onOpenSignIn={onOpenSignIn} />
           {user && (
             <button 
@@ -99,8 +117,29 @@ export const Layout: React.FC<LayoutProps> = ({
         </div>
       </header>
 
-      {showManagementViewControls && onManagementViewModeChange && (
+      {showAdminModeSwitch && onAdminModeChange && (
         <div className={`sticky top-[72px] z-30 border-b border-[var(--color-bg-secondary)] bg-white/95 backdrop-blur px-4 py-2 flex items-center justify-between ${
+          isDesktopManagementShell ? 'max-w-[1440px] mx-auto w-full' : ''
+        }`}>
+          <p className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">Admin Mode</p>
+          <div className="inline-flex rounded-full border border-[var(--color-border)] bg-[var(--color-bg)] p-1">
+            {(['management', 'customer'] as const).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => onAdminModeChange(mode)}
+                className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest transition-colors ${
+                  adminMode === mode ? 'bg-[var(--color-primary)] text-white' : 'text-[var(--color-text-muted)]'
+                }`}
+              >
+                {mode === 'management' ? 'Management View' : 'Customer View'}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {showManagementViewControls && onManagementViewModeChange && (
+        <div className={`sticky ${showAdminModeSwitch ? 'top-[117px]' : 'top-[72px]'} z-30 border-b border-[var(--color-bg-secondary)] bg-white/95 backdrop-blur px-4 py-2 flex items-center justify-between ${
           isDesktopManagementShell ? 'max-w-[1440px] mx-auto w-full' : ''
         }`}>
           <p className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">Management View</p>

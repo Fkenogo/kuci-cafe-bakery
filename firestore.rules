@@ -100,6 +100,10 @@ service cloud.firestore {
       return isAuthenticated() && userRole() == 'bakery_front_service';
     }
 
+    function canCreateStaffAssistedOrder() {
+      return isAdmin() || isFrontService() || isBakeryFrontService();
+    }
+
     function isKitchen() {
       return isAuthenticated() && userRole() == 'kitchen';
     }
@@ -159,7 +163,7 @@ service cloud.firestore {
 
     function isValidUser(data) {
       return data.keys().hasAll(['uid', 'displayName', 'role', 'isActive']) &&
-             data.keys().hasOnly(['uid', 'email', 'phoneNumber', 'displayName', 'photoURL', 'role', 'createdAt', 'updatedAt', 'isActive', 'phone', 'staffCode', 'shiftLabel', 'profileType', 'linkedUid', 'linkedAt']) &&
+             data.keys().hasOnly(['uid', 'email', 'phoneNumber', 'displayName', 'photoURL', 'role', 'createdAt', 'updatedAt', 'isActive', 'phone', 'staffCode', 'shiftLabel', 'profileType', 'linkedUid', 'linkedAt', 'linkedInviteId']) &&
              data.uid is string && data.uid.size() > 0 &&
              data.displayName is string && data.displayName.size() > 0 && data.displayName.size() < 100 &&
              hasAuthIdentifier(data) &&
@@ -170,8 +174,52 @@ service cloud.firestore {
              (!('profileType' in data) || data.profileType in ['staff_profile', 'linked_account']) &&
              (!('linkedUid' in data) || (data.linkedUid is string && data.linkedUid.size() > 0)) &&
              (!('linkedAt' in data) || data.linkedAt is timestamp) &&
+             (!('linkedInviteId' in data) || (data.linkedInviteId is string && data.linkedInviteId.size() > 0)) &&
              data.isActive is bool &&
              data.role in ['admin', 'user', 'front_service', 'bakery_front_service', 'kitchen', 'barista', 'bakery_account_reconciliation', 'cafe_account_reconciliation'];
+    }
+
+    function isValidStaffInvite(data) {
+      return data.keys().hasAll(['role', 'status', 'createdBy', 'tokenHash']) &&
+             data.keys().hasOnly(['role', 'status', 'createdBy', 'createdAt', 'updatedAt', 'expiresAt', 'claimedByUid', 'claimedAt', 'email', 'phone', 'tokenHash']) &&
+             data.role in ['admin', 'front_service', 'bakery_front_service', 'kitchen', 'barista', 'bakery_account_reconciliation', 'cafe_account_reconciliation'] &&
+             data.status in ['pending', 'claimed', 'revoked', 'expired'] &&
+             data.createdBy is string && data.createdBy.size() > 0 &&
+             data.tokenHash is string && data.tokenHash.size() > 0 &&
+             (!('createdAt' in data) || data.createdAt is timestamp) &&
+             (!('updatedAt' in data) || data.updatedAt is timestamp) &&
+             (!('expiresAt' in data) || data.expiresAt == null || data.expiresAt is timestamp) &&
+             (!('claimedByUid' in data) || data.claimedByUid == null || (data.claimedByUid is string && data.claimedByUid.size() > 0)) &&
+             (!('claimedAt' in data) || data.claimedAt == null || data.claimedAt is timestamp) &&
+             (!('email' in data) || data.email == null || data.email is string) &&
+             (!('phone' in data) || data.phone == null || data.phone is string);
+    }
+
+    function isValidInviteClaimUpdate() {
+      return isAuthenticated() &&
+             request.resource.data.diff(resource.data).changedKeys().hasOnly(['status', 'claimedByUid', 'claimedAt', 'updatedAt']) &&
+             resource.data.status == 'pending' &&
+             request.resource.data.status == 'claimed' &&
+             request.resource.data.claimedByUid == request.auth.uid &&
+             request.resource.data.claimedAt is timestamp &&
+             request.resource.data.updatedAt is timestamp &&
+             request.resource.data.role == resource.data.role &&
+             request.resource.data.createdBy == resource.data.createdBy &&
+             request.resource.data.tokenHash == resource.data.tokenHash &&
+             request.resource.data.expiresAt == resource.data.expiresAt &&
+             request.resource.data.email == resource.data.email &&
+             request.resource.data.phone == resource.data.phone;
+    }
+
+    function hasValidInviteRoleAssignment(userId) {
+      return isOwner(userId) &&
+             'linkedInviteId' in request.resource.data &&
+             request.resource.data.linkedInviteId is string &&
+             exists(/databases/$(database)/documents/staffInvites/$(request.resource.data.linkedInviteId)) &&
+             get(/databases/$(database)/documents/staffInvites/$(request.resource.data.linkedInviteId)).data.status == 'claimed' &&
+             get(/databases/$(database)/documents/staffInvites/$(request.resource.data.linkedInviteId)).data.claimedByUid == request.auth.uid &&
+             get(/databases/$(database)/documents/staffInvites/$(request.resource.data.linkedInviteId)).data.role == request.resource.data.role &&
+             request.resource.data.role in ['admin', 'front_service', 'bakery_front_service', 'kitchen', 'barista', 'bakery_account_reconciliation', 'cafe_account_reconciliation'];
     }
 
     function isValidStaffIdentity(identity) {
@@ -340,15 +388,128 @@ service cloud.firestore {
       return customer is map &&
              customer.keys().hasAll(['name', 'phone']) &&
              customer.keys().hasOnly(['name', 'phone', 'location']) &&
-             customer.name is string && customer.name.size() >= 3 &&
-             customer.phone is string && customer.phone.size() >= 10 &&
+             customer.name is string &&
+             customer.phone is string &&
              (!('location' in customer) || customer.location is string);
+    }
+
+    function isValidOrderEntryMode(mode) {
+      return mode in ['customer_self', 'staff_assisted'];
+    }
+
+    function isValidOrderSource(source) {
+      return source in ['walk_in', 'phone_call', 'whatsapp', 'other'];
+    }
+
+    function isValidCheckoutPaymentChoice(choice) {
+      return choice in ['cash', 'mobile_money', 'whatsapp'];
+    }
+
+    function hasValidOrderCustomerIdentityByMode(data) {
+      return (
+        data.orderEntryMode == 'customer_self' &&
+        data.customer.name.size() >= 3 &&
+        data.customer.phone.size() >= 10
+      ) || (
+        data.orderEntryMode == 'staff_assisted' &&
+        (data.customer.name.size() >= 3 || data.customer.phone.size() >= 10)
+      );
+    }
+
+    function hasValidOrderEntryMetadata(data) {
+      return (data.orderEntryMode == 'customer_self' &&
+              !('orderSource' in data) &&
+              !('createdByStaffUid' in data) &&
+              !('createdByStaffRole' in data) &&
+              !('createdByStaffName' in data) &&
+              !('assistedCustomerName' in data) &&
+              !('assistedCustomerPhoneNormalized' in data)) ||
+             (data.orderEntryMode == 'staff_assisted' &&
+              canCreateStaffAssistedOrder() &&
+              ('orderSource' in data) &&
+              isValidOrderSource(data.orderSource) &&
+              ('createdByStaffUid' in data) &&
+              data.createdByStaffUid is string &&
+              data.createdByStaffUid == request.auth.uid &&
+              ('createdByStaffRole' in data) &&
+              data.createdByStaffRole in ['admin', 'front_service', 'bakery_front_service'] &&
+              ((data.createdByStaffRole == userRole()) ||
+               (data.createdByStaffRole == 'admin' && isAdmin())) &&
+              ('createdByStaffName' in data) &&
+              data.createdByStaffName is string &&
+              data.createdByStaffName.size() > 0 &&
+              (!('assistedCustomerName' in data) || data.assistedCustomerName is string) &&
+              (!('assistedCustomerPhoneNormalized' in data) || data.assistedCustomerPhoneNormalized is string));
     }
 
     function hasValidOrderUserId(data) {
       return !('userId' in data) ||
              data.userId == null ||
              (data.userId is string && isOwner(data.userId));
+    }
+
+    function isValidPaymentMethod(method) {
+      return method == null || method in ['cash', 'mobile_money', 'bank_transfer', 'other'];
+    }
+
+    function isValidOrderPayment(payment) {
+      return payment is map &&
+             payment.keys().hasAll(['method', 'amountReceived', 'currency', 'isComplimentary', 'isCredit', 'recordedBy', 'recordedAt']) &&
+             payment.keys().hasOnly(['method', 'amountReceived', 'currency', 'isComplimentary', 'isCredit', 'recordedBy', 'recordedAt']) &&
+             isValidPaymentMethod(payment.method) &&
+             payment.amountReceived is number &&
+             payment.amountReceived >= 0 &&
+             payment.currency is string &&
+             payment.currency.size() > 0 &&
+             payment.isComplimentary is bool &&
+             payment.isCredit is bool &&
+             (payment.recordedBy == null || isValidStaffIdentity(payment.recordedBy)) &&
+             (payment.recordedAt == null || payment.recordedAt is timestamp);
+    }
+
+    function isValidOrderReceipt(receipt) {
+      return receipt is map &&
+             receipt.keys().hasAll(['receiptNumber', 'generatedAt', 'visibleToCustomer']) &&
+             receipt.keys().hasOnly(['receiptNumber', 'generatedAt', 'visibleToCustomer']) &&
+             receipt.receiptNumber is string &&
+             receipt.receiptNumber.size() > 0 &&
+             receipt.generatedAt is timestamp &&
+             receipt.visibleToCustomer is bool;
+    }
+
+    function isValidOrderLoyaltyRedemption(redemption, total) {
+      return redemption is map &&
+             redemption.keys().hasAll(['selectedByCustomer', 'requestedAmount', 'appliedAmount', 'blockSize']) &&
+             redemption.keys().hasOnly(['selectedByCustomer', 'requestedAmount', 'appliedAmount', 'blockSize']) &&
+             redemption.selectedByCustomer is bool &&
+             redemption.requestedAmount is number &&
+             redemption.appliedAmount is number &&
+             redemption.blockSize is number &&
+             redemption.blockSize == 1000 &&
+             redemption.requestedAmount >= 0 &&
+             redemption.appliedAmount >= 0 &&
+             redemption.requestedAmount % 1000 == 0 &&
+             redemption.appliedAmount % 1000 == 0 &&
+             redemption.appliedAmount <= redemption.requestedAmount &&
+             redemption.appliedAmount <= total &&
+             (redemption.selectedByCustomer || (redemption.requestedAmount == 0 && redemption.appliedAmount == 0));
+    }
+
+    function hasCustomerVisibleReceipt(data) {
+      return ('receipt' in data) &&
+             isValidOrderReceipt(data.receipt) &&
+             data.receipt.visibleToCustomer == true &&
+             data.status == 'completed';
+    }
+
+    function canReadGuestTrackedOrder(data) {
+      return hasValidOrderUserId(data) &&
+             (!('userId' in data) || data.userId == null) &&
+             isValidOrderCustomer(data.customer) &&
+             isValidOrderStatus(data.status) &&
+             data.createdAt is timestamp &&
+             data.businessDate is string &&
+             data.businessDate.matches("^\\d{4}-\\d{2}-\\d{2}$");
     }
 
     function isValidStationProgress(progress) {
@@ -402,10 +563,15 @@ service cloud.firestore {
                'businessDate',
                'status',
                'paymentStatus',
+               'payment',
+               'financialStatus',
+               'loyaltyRedemption',
                'serviceMode',
                'serviceArea',
                'frontLane',
                'dispatchMode',
+               'orderEntryMode',
+               'checkoutPaymentChoice',
                'customer',
                'items',
                'subtotal',
@@ -424,10 +590,15 @@ service cloud.firestore {
                'businessDate',
                'status',
                'paymentStatus',
+               'payment',
+               'financialStatus',
+               'loyaltyRedemption',
                'serviceMode',
                'serviceArea',
                'frontLane',
                'dispatchMode',
+               'orderEntryMode',
+               'checkoutPaymentChoice',
                'customer',
                'items',
                'subtotal',
@@ -439,6 +610,12 @@ service cloud.firestore {
                'stationStatus',
                'frontAcceptedBy',
                'completedBy',
+               'orderSource',
+               'createdByStaffUid',
+               'createdByStaffRole',
+               'createdByStaffName',
+               'assistedCustomerName',
+               'assistedCustomerPhoneNormalized',
                'userId',
                'accountingTreatment',
                'accountingReasonCode',
@@ -453,7 +630,8 @@ service cloud.firestore {
                'recoveryAction',
                'recoveryReason',
                'recoveryUpdatedAt',
-               'recoveryUpdatedBy'
+               'recoveryUpdatedBy',
+               'receipt'
              ]) &&
              data.createdAt is timestamp &&
              data.updatedAt is timestamp &&
@@ -461,11 +639,25 @@ service cloud.firestore {
              data.businessDate.matches("^\\d{4}-\\d{2}-\\d{2}$") &&
              data.status == 'pending' &&
              data.paymentStatus == 'pending' &&
+             data.financialStatus == 'unpaid' &&
+             (!('loyaltyRedemption' in data) || isValidOrderLoyaltyRedemption(data.loyaltyRedemption, data.total)) &&
+             isValidOrderPayment(data.payment) &&
+             data.payment.method == null &&
+             data.payment.amountReceived == 0 &&
+             data.payment.currency is string &&
+             data.payment.isComplimentary == false &&
+             data.payment.isCredit == false &&
+             data.payment.recordedBy == null &&
+             data.payment.recordedAt == null &&
              data.serviceMode in ['dine_in', 'pickup', 'delivery'] &&
+             isValidOrderEntryMode(data.orderEntryMode) &&
+             isValidCheckoutPaymentChoice(data.checkoutPaymentChoice) &&
+             hasValidOrderEntryMetadata(data) &&
              data.serviceArea in ['cafe', 'bakery', 'mixed'] &&
              data.frontLane in ['cafe_front', 'bakery_front'] &&
              data.dispatchMode in ['station_prep', 'front_only', 'bakery_front_only', 'mixed_split'] &&
              isValidOrderCustomer(data.customer) &&
+             hasValidOrderCustomerIdentityByMode(data) &&
              data.items is list &&
              data.items.size() > 0 &&
              isValidOrderItem(data.items[0]) &&
@@ -487,6 +679,7 @@ service cloud.firestore {
              (!('recoveryReason' in data) || data.recoveryReason in ['stale_recovery_complete', 'stale_recovery_cancel', 'stale_recovery_carry_forward']) &&
              (!('recoveryUpdatedAt' in data) || data.recoveryUpdatedAt is timestamp) &&
              (!('recoveryUpdatedBy' in data) || data.recoveryUpdatedBy == null || isValidStaffIdentity(data.recoveryUpdatedBy)) &&
+             (!('receipt' in data) || isValidOrderReceipt(data.receipt)) &&
              (!('frontAcceptedBy' in data) || data.frontAcceptedBy == null || isValidStaffIdentity(data.frontAcceptedBy)) &&
              (!('completedBy' in data) || data.completedBy == null || isValidStaffIdentity(data.completedBy)) &&
              (!('routedTasks' in data) ||
@@ -504,10 +697,21 @@ service cloud.firestore {
       return request.resource.data.createdAt == resource.data.createdAt &&
              request.resource.data.businessDate == resource.data.businessDate &&
              request.resource.data.paymentStatus == resource.data.paymentStatus &&
+             request.resource.data.payment == resource.data.payment &&
+             request.resource.data.financialStatus == resource.data.financialStatus &&
+             request.resource.data.loyaltyRedemption == resource.data.loyaltyRedemption &&
              request.resource.data.serviceMode == resource.data.serviceMode &&
              request.resource.data.serviceArea == resource.data.serviceArea &&
              request.resource.data.frontLane == resource.data.frontLane &&
              request.resource.data.dispatchMode == resource.data.dispatchMode &&
+             request.resource.data.orderEntryMode == resource.data.orderEntryMode &&
+             request.resource.data.checkoutPaymentChoice == resource.data.checkoutPaymentChoice &&
+             request.resource.data.orderSource == resource.data.orderSource &&
+             request.resource.data.createdByStaffUid == resource.data.createdByStaffUid &&
+             request.resource.data.createdByStaffRole == resource.data.createdByStaffRole &&
+             request.resource.data.createdByStaffName == resource.data.createdByStaffName &&
+             request.resource.data.assistedCustomerName == resource.data.assistedCustomerName &&
+             request.resource.data.assistedCustomerPhoneNormalized == resource.data.assistedCustomerPhoneNormalized &&
              request.resource.data.customer == resource.data.customer &&
              request.resource.data.items == resource.data.items &&
              request.resource.data.subtotal == resource.data.subtotal &&
@@ -529,7 +733,8 @@ service cloud.firestore {
              request.resource.data.recoveryAction == resource.data.recoveryAction &&
              request.resource.data.recoveryReason == resource.data.recoveryReason &&
              request.resource.data.recoveryUpdatedAt == resource.data.recoveryUpdatedAt &&
-             request.resource.data.recoveryUpdatedBy == resource.data.recoveryUpdatedBy;
+             request.resource.data.recoveryUpdatedBy == resource.data.recoveryUpdatedBy &&
+             request.resource.data.receipt == resource.data.receipt;
     }
 
     function isOrderIdentityUnchanged() {
@@ -574,10 +779,21 @@ service cloud.firestore {
              request.resource.data.createdAt == resource.data.createdAt &&
              request.resource.data.businessDate == resource.data.businessDate &&
              request.resource.data.paymentStatus == resource.data.paymentStatus &&
+             request.resource.data.payment == resource.data.payment &&
+             request.resource.data.financialStatus == resource.data.financialStatus &&
+             request.resource.data.loyaltyRedemption == resource.data.loyaltyRedemption &&
              request.resource.data.serviceMode == resource.data.serviceMode &&
              request.resource.data.serviceArea == resource.data.serviceArea &&
              request.resource.data.frontLane == resource.data.frontLane &&
              request.resource.data.dispatchMode == resource.data.dispatchMode &&
+             request.resource.data.orderEntryMode == resource.data.orderEntryMode &&
+             request.resource.data.checkoutPaymentChoice == resource.data.checkoutPaymentChoice &&
+             request.resource.data.orderSource == resource.data.orderSource &&
+             request.resource.data.createdByStaffUid == resource.data.createdByStaffUid &&
+             request.resource.data.createdByStaffRole == resource.data.createdByStaffRole &&
+             request.resource.data.createdByStaffName == resource.data.createdByStaffName &&
+             request.resource.data.assistedCustomerName == resource.data.assistedCustomerName &&
+             request.resource.data.assistedCustomerPhoneNormalized == resource.data.assistedCustomerPhoneNormalized &&
              request.resource.data.customer == resource.data.customer &&
              request.resource.data.items == resource.data.items &&
              request.resource.data.subtotal == resource.data.subtotal &&
@@ -589,6 +805,7 @@ service cloud.firestore {
              request.resource.data.stationStatus == resource.data.stationStatus &&
              request.resource.data.frontAcceptedBy == resource.data.frontAcceptedBy &&
              request.resource.data.completedBy == resource.data.completedBy &&
+             request.resource.data.receipt == resource.data.receipt &&
              request.resource.data.userId == resource.data.userId;
     }
 
@@ -618,10 +835,21 @@ service cloud.firestore {
              request.resource.data.createdAt == resource.data.createdAt &&
              request.resource.data.businessDate == resource.data.businessDate &&
              request.resource.data.paymentStatus == resource.data.paymentStatus &&
+             request.resource.data.payment == resource.data.payment &&
+             request.resource.data.financialStatus == resource.data.financialStatus &&
+             request.resource.data.loyaltyRedemption == resource.data.loyaltyRedemption &&
              request.resource.data.serviceMode == resource.data.serviceMode &&
              request.resource.data.serviceArea == resource.data.serviceArea &&
              request.resource.data.frontLane == resource.data.frontLane &&
              request.resource.data.dispatchMode == resource.data.dispatchMode &&
+             request.resource.data.orderEntryMode == resource.data.orderEntryMode &&
+             request.resource.data.checkoutPaymentChoice == resource.data.checkoutPaymentChoice &&
+             request.resource.data.orderSource == resource.data.orderSource &&
+             request.resource.data.createdByStaffUid == resource.data.createdByStaffUid &&
+             request.resource.data.createdByStaffRole == resource.data.createdByStaffRole &&
+             request.resource.data.createdByStaffName == resource.data.createdByStaffName &&
+             request.resource.data.assistedCustomerName == resource.data.assistedCustomerName &&
+             request.resource.data.assistedCustomerPhoneNormalized == resource.data.assistedCustomerPhoneNormalized &&
              request.resource.data.customer == resource.data.customer &&
              request.resource.data.items == resource.data.items &&
              request.resource.data.subtotal == resource.data.subtotal &&
@@ -638,17 +866,21 @@ service cloud.firestore {
              ) &&
              request.resource.data.recoveryUpdatedAt is timestamp &&
              (!('recoveryUpdatedBy' in request.resource.data) || request.resource.data.recoveryUpdatedBy == null || isValidStaffIdentity(request.resource.data.recoveryUpdatedBy)) &&
-             (
-               (
+              (
+                (
                  resource.data.status in ['pending', 'front_accepted', 'in_progress', 'ready_for_handover'] &&
                  resource.data.status == 'ready_for_handover' &&
-                 request.resource.data.status == 'completed' &&
-                 isCurrentUserIdentity(request.resource.data.completedBy) &&
-                 request.resource.data.involvedStations.size() == 0 &&
-                 request.resource.data.stationStatus.keys().size() == 0 &&
-                 request.resource.data.recoveryAction == 'stale_complete' &&
-                 request.resource.data.recoveryReason == 'stale_recovery_complete'
-               ) ||
+                request.resource.data.status == 'completed' &&
+                isCurrentUserIdentity(request.resource.data.completedBy) &&
+                request.resource.data.involvedStations.size() == 0 &&
+                request.resource.data.stationStatus.keys().size() == 0 &&
+                request.resource.data.paymentStatus == resource.data.paymentStatus &&
+                request.resource.data.payment == resource.data.payment &&
+                request.resource.data.financialStatus == resource.data.financialStatus &&
+                request.resource.data.receipt == resource.data.receipt &&
+                request.resource.data.recoveryAction == 'stale_complete' &&
+                request.resource.data.recoveryReason == 'stale_recovery_complete'
+              ) ||
                (
                  resource.data.status in ['pending', 'front_accepted', 'in_progress', 'ready_for_handover'] &&
                  request.resource.data.status == 'rejected' &&
@@ -659,14 +891,32 @@ service cloud.firestore {
                  request.resource.data.resolutionReason == 'stale_recovery_cancel' &&
                  request.resource.data.resolutionUpdatedAt is timestamp &&
                  (!('resolutionUpdatedBy' in request.resource.data) || request.resource.data.resolutionUpdatedBy == null || isValidStaffIdentity(request.resource.data.resolutionUpdatedBy)) &&
-                 request.resource.data.recoveryAction == 'stale_cancel' &&
-                 request.resource.data.recoveryReason == 'stale_recovery_cancel'
-               )
-             );
+                request.resource.data.recoveryAction == 'stale_cancel' &&
+                request.resource.data.recoveryReason == 'stale_recovery_cancel' &&
+                request.resource.data.paymentStatus == resource.data.paymentStatus &&
+                request.resource.data.payment == resource.data.payment &&
+                request.resource.data.financialStatus == resource.data.financialStatus &&
+                request.resource.data.receipt == resource.data.receipt
+              )
+            );
     }
 
     function isValidFrontServiceUpdate() {
-      return request.resource.data.diff(resource.data).changedKeys().hasOnly(['status', 'updatedAt', 'stationStatus', 'involvedStations', 'frontAcceptedBy', 'completedBy']) &&
+      return request.resource.data.diff(resource.data).changedKeys().hasOnly([
+               'status',
+               'updatedAt',
+               'stationStatus',
+               'involvedStations',
+               'frontAcceptedBy',
+               'completedBy',
+               'paymentStatus',
+               'payment',
+               'financialStatus',
+               'receipt',
+               'accountingTreatment',
+               'accountingUpdatedAt',
+               'accountingUpdatedBy'
+             ]) &&
              request.resource.data.updatedAt is timestamp &&
              (
                (isFrontService() && (!('frontLane' in resource.data) || resource.data.frontLane == 'cafe_front')) ||
@@ -679,13 +929,29 @@ service cloud.firestore {
                 request.resource.data.status in ['front_accepted', 'ready_for_handover'] &&
                 isCurrentUserIdentity(request.resource.data.frontAcceptedBy) &&
                 request.resource.data.completedBy == resource.data.completedBy &&
+                request.resource.data.paymentStatus == resource.data.paymentStatus &&
+                request.resource.data.payment == resource.data.payment &&
+                request.resource.data.financialStatus == resource.data.financialStatus &&
+                request.resource.data.receipt == resource.data.receipt &&
+                request.resource.data.accountingTreatment == resource.data.accountingTreatment &&
+                request.resource.data.accountingUpdatedAt == resource.data.accountingUpdatedAt &&
+                request.resource.data.accountingUpdatedBy == resource.data.accountingUpdatedBy &&
                 hasQueuedStationsForInvolved(request.resource.data)) ||
                (resource.data.status == 'ready_for_handover' &&
                 request.resource.data.status == 'completed' &&
                 isCurrentUserIdentity(request.resource.data.completedBy) &&
                 request.resource.data.frontAcceptedBy == resource.data.frontAcceptedBy &&
                 request.resource.data.stationStatus == resource.data.stationStatus &&
-                request.resource.data.involvedStations == resource.data.involvedStations)
+                request.resource.data.involvedStations == resource.data.involvedStations &&
+                request.resource.data.paymentStatus in ['paid', 'complimentary', 'credit'] &&
+                request.resource.data.financialStatus in ['paid', 'complimentary', 'credit'] &&
+                isValidOrderPayment(request.resource.data.payment) &&
+                request.resource.data.payment.recordedBy == request.resource.data.completedBy &&
+                request.resource.data.payment.recordedAt is timestamp &&
+                isValidOrderReceipt(request.resource.data.receipt) &&
+                request.resource.data.accountingTreatment in ['paid', 'complimentary', 'credit'] &&
+                request.resource.data.accountingUpdatedAt is timestamp &&
+                (request.resource.data.accountingUpdatedBy == null || isValidStaffIdentity(request.resource.data.accountingUpdatedBy)))
              );
     }
 
@@ -784,10 +1050,20 @@ service cloud.firestore {
              request.resource.data.businessDate == resource.data.businessDate &&
              request.resource.data.status == resource.data.status &&
              request.resource.data.paymentStatus == resource.data.paymentStatus &&
+             request.resource.data.payment == resource.data.payment &&
+             request.resource.data.financialStatus == resource.data.financialStatus &&
              request.resource.data.serviceMode == resource.data.serviceMode &&
              request.resource.data.serviceArea == resource.data.serviceArea &&
              request.resource.data.frontLane == resource.data.frontLane &&
              request.resource.data.dispatchMode == resource.data.dispatchMode &&
+             request.resource.data.orderEntryMode == resource.data.orderEntryMode &&
+             request.resource.data.checkoutPaymentChoice == resource.data.checkoutPaymentChoice &&
+             request.resource.data.orderSource == resource.data.orderSource &&
+             request.resource.data.createdByStaffUid == resource.data.createdByStaffUid &&
+             request.resource.data.createdByStaffRole == resource.data.createdByStaffRole &&
+             request.resource.data.createdByStaffName == resource.data.createdByStaffName &&
+             request.resource.data.assistedCustomerName == resource.data.assistedCustomerName &&
+             request.resource.data.assistedCustomerPhoneNormalized == resource.data.assistedCustomerPhoneNormalized &&
              request.resource.data.customer == resource.data.customer &&
              request.resource.data.items == resource.data.items &&
              request.resource.data.subtotal == resource.data.subtotal &&
@@ -808,6 +1084,7 @@ service cloud.firestore {
              request.resource.data.recoveryReason == resource.data.recoveryReason &&
              request.resource.data.recoveryUpdatedAt == resource.data.recoveryUpdatedAt &&
              request.resource.data.recoveryUpdatedBy == resource.data.recoveryUpdatedBy &&
+             request.resource.data.receipt == resource.data.receipt &&
              request.resource.data.userId == resource.data.userId;
     }
 
@@ -824,25 +1101,29 @@ service cloud.firestore {
     // Publicly readable categories
     match /categories/{categoryId} {
       allow read: if true;
-      allow write: if isAdmin() && isValidCategory(request.resource.data);
+      allow create, update: if isAdmin() && isValidCategory(request.resource.data);
+      allow delete: if isAdmin();
     }
 
     // Publicly readable menu items
     match /menu/{itemId} {
       allow read: if true;
-      allow write: if isAdmin() && isValidMenuItem(request.resource.data);
+      allow create, update: if isAdmin() && isValidMenuItem(request.resource.data);
+      allow delete: if isAdmin();
     }
 
     // Publicly readable bakery categories
     match /bakeryCategories/{categoryId} {
       allow read: if true;
-      allow write: if isAdmin() && isValidBakeryCategory(request.resource.data);
+      allow create, update: if isAdmin() && isValidBakeryCategory(request.resource.data);
+      allow delete: if isAdmin();
     }
 
     // Publicly readable bakery items
     match /bakeryItems/{itemId} {
       allow read: if true;
-      allow write: if isAdmin() && isValidBakeryItem(request.resource.data);
+      allow create, update: if isAdmin() && isValidBakeryItem(request.resource.data);
+      allow delete: if isAdmin();
     }
 
     // User profiles
@@ -866,14 +1147,31 @@ service cloud.firestore {
         isValidUser(request.resource.data) &&
         request.resource.data.uid == userId &&
         matchesAuthIdentifier(request.resource.data) &&
-        request.resource.data.role == resource.data.role;
+        (request.resource.data.role == resource.data.role ||
+         hasValidInviteRoleAssignment(userId));
       allow write: if isAdmin();
+    }
+
+    match /staffInvites/{inviteId} {
+      allow create: if isAdmin() && isValidStaffInvite(request.resource.data);
+      allow read: if isAdmin() ||
+        (isAuthenticated() &&
+          resource.data.status in ['pending', 'claimed', 'expired'] &&
+          (!('claimedByUid' in resource.data) || resource.data.claimedByUid == null || resource.data.claimedByUid == request.auth.uid));
+      allow update: if (isAdmin() && isValidStaffInvite(request.resource.data)) ||
+        isValidInviteClaimUpdate();
+      allow delete: if isAdmin();
     }
 
     match /orders/{orderId} {
       allow create: if isValidOrder(request.resource.data);
-      allow read: if canReadOperationalOrders() ||
-        (resource.data.userId is string && isOwner(resource.data.userId));
+      allow get: if canReadOperationalOrders() ||
+        (resource.data.userId is string && isOwner(resource.data.userId)) ||
+        hasCustomerVisibleReceipt(resource.data) ||
+        canReadGuestTrackedOrder(resource.data);
+      allow list: if canReadOperationalOrders() ||
+        (resource.data.userId is string && isOwner(resource.data.userId)) ||
+        hasCustomerVisibleReceipt(resource.data);
       allow update: if (isAdmin() && isValidAdminOrderUpdate()) ||
         (isAdmin() && isValidForcedDayCloseUpdate()) ||
         (isAdmin() && isValidStaleRecoveryUpdate()) ||
@@ -884,23 +1182,64 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /customerRewards/{rewardId} {
+      allow get: if true;
+      allow list: if isAdmin() || isFrontService() || isBakeryFrontService() || isBakeryAccountReconciliation() || isCafeAccountReconciliation();
+      allow create, update: if isAdmin() || isFrontService() || isBakeryFrontService();
+      allow delete: if isAdmin();
+
+      match /transactions/{transactionId} {
+        allow get, list: if isAdmin() || isFrontService() || isBakeryFrontService() || isBakeryAccountReconciliation() || isCafeAccountReconciliation();
+        allow create, update: if isAdmin() || isFrontService() || isBakeryFrontService();
+        allow delete: if isAdmin();
+      }
+    }
+
     match /bakeryStockLedger/{entryId} {
-      allow read: if isAdmin() || isBakeryAccountReconciliation() || isCafeAccountReconciliation();
+      allow read: if isAdmin() || isBakeryAccountReconciliation();
       allow write: if isAdmin() || isBakeryAccountReconciliation();
     }
 
     match /bakeryDailyReconciliation/{docId} {
-      allow read: if isAdmin() || isBakeryAccountReconciliation() || isCafeAccountReconciliation();
-      allow write: if isAdmin() || isBakeryAccountReconciliation();
+      allow read: if isAdmin() || isBakeryAccountReconciliation();
+      allow create: if isAdmin();
+      allow update: if isAdmin() ||
+        (isBakeryAccountReconciliation() &&
+         resource.data.status == 'open' &&
+         request.resource.data.status == 'open' &&
+         request.resource.data.businessDate == resource.data.businessDate &&
+         request.resource.data.createdAt == resource.data.createdAt &&
+         request.resource.data.openedBy == resource.data.openedBy &&
+         request.resource.data.closedBy == resource.data.closedBy &&
+         request.resource.data.closedAt == resource.data.closedAt &&
+         request.resource.data.reopenedBy == resource.data.reopenedBy &&
+         request.resource.data.reopenedAt == resource.data.reopenedAt &&
+         request.resource.data.lastUpdatedAt is timestamp &&
+         isCurrentUserIdentity(request.resource.data.lastUpdatedBy));
+      allow delete: if isAdmin();
     }
 
     match /cafeDailyReconciliation/{docId} {
-      allow read: if isAdmin() || isBakeryAccountReconciliation() || isCafeAccountReconciliation();
-      allow write: if isAdmin() || isCafeAccountReconciliation();
+      allow read: if isAdmin() || isCafeAccountReconciliation();
+      allow create: if isAdmin();
+      allow update: if isAdmin() ||
+        (isCafeAccountReconciliation() &&
+         resource.data.status == 'open' &&
+         request.resource.data.status == 'open' &&
+         request.resource.data.businessDate == resource.data.businessDate &&
+         request.resource.data.createdAt == resource.data.createdAt &&
+         request.resource.data.openedBy == resource.data.openedBy &&
+         request.resource.data.closedBy == resource.data.closedBy &&
+         request.resource.data.closedAt == resource.data.closedAt &&
+         request.resource.data.reopenedBy == resource.data.reopenedBy &&
+         request.resource.data.reopenedAt == resource.data.reopenedAt &&
+         request.resource.data.lastUpdatedAt is timestamp &&
+         isCurrentUserIdentity(request.resource.data.lastUpdatedBy));
+      allow delete: if isAdmin();
     }
 
     match /bakeryStockSnapshots/{docId} {
-      allow read: if isAdmin() || isBakeryAccountReconciliation() || isCafeAccountReconciliation();
+      allow read: if isAdmin() || isBakeryAccountReconciliation();
       allow write: if isAdmin() || isBakeryAccountReconciliation();
     }
 

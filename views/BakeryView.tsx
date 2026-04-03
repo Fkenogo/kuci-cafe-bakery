@@ -1,16 +1,50 @@
-import React, { useMemo, useState } from 'react';
-import { Cake, Coffee, Croissant, MessageCircle, Plus, Sandwich } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { ArrowRight, Cake, Coffee, Croissant, MessageCircle, Plus, Sandwich } from 'lucide-react';
+import { db } from '../lib/firebase';
+import { toBusinessDate } from '../lib/businessDate';
 import { CONTACT_INFO } from '../constants';
-import { BakeryCategory, BakeryItem, Category, ItemCustomization, MenuItem } from '../types';
+import { BakeryCategory, BakeryDailyReconciliation, BakeryItem, Category, ItemCustomization, MenuItem } from '../types';
 import { adaptBakeryItemToMenuItem, getMenuItemPriceLabel, getMenuItemPrimaryImage } from '../lib/catalog';
 import { CustomizerModal } from '../components/CustomizerModal';
 import { SafeImage } from '../components/SafeImage';
+
+const LOW_STOCK_THRESHOLD = 3;
+
+type StockStatus = 'in_stock' | 'low_stock' | 'out_of_stock' | 'unknown';
+
+function getStockStatus(qty: number | undefined): StockStatus {
+  if (qty === undefined) return 'unknown';
+  if (qty <= 0) return 'out_of_stock';
+  if (qty <= LOW_STOCK_THRESHOLD) return 'low_stock';
+  return 'in_stock';
+}
+
+function StockBadge({ status, qty }: { status: StockStatus; qty?: number }) {
+  if (status === 'in_stock') {
+    return <span className="text-[10px] font-black uppercase tracking-widest rounded-full px-2 py-0.5 bg-emerald-100 text-emerald-700">In stock</span>;
+  }
+  if (status === 'low_stock') {
+    return <span className="text-[10px] font-black uppercase tracking-widest rounded-full px-2 py-0.5 bg-amber-100 text-amber-700">Low stock{qty !== undefined ? ` · ${qty}` : ''}</span>;
+  }
+  if (status === 'out_of_stock') {
+    return <span className="text-[10px] font-black uppercase tracking-widest rounded-full px-2 py-0.5 bg-red-100 text-red-700">Out of stock</span>;
+  }
+  return null;
+}
+
+interface StaffOrderSession {
+  customerName: string;
+  staffCartCount: number;
+  onReturn: () => void;
+}
 
 interface BakeryViewProps {
   bakeryCategories: BakeryCategory[];
   bakeryItems: BakeryItem[];
   addToCart: (item: MenuItem, customization?: ItemCustomization) => void;
   menuCategories: Category[];
+  staffSession?: StaffOrderSession;
 }
 
 export const BakeryView: React.FC<BakeryViewProps> = ({
@@ -18,9 +52,36 @@ export const BakeryView: React.FC<BakeryViewProps> = ({
   bakeryItems,
   addToCart,
   menuCategories,
+  staffSession,
 }) => {
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [selectedBakeryItem, setSelectedBakeryItem] = useState<BakeryItem | null>(null);
+  const [availabilityByItemId, setAvailabilityByItemId] = useState<Record<string, number>>({});
+  const [stockDataLoaded, setStockDataLoaded] = useState(false);
+
+  useEffect(() => {
+    const today = toBusinessDate();
+    const unsubscribe = onSnapshot(
+      doc(db, 'bakeryDailyReconciliation', today),
+      (snapshot) => {
+        if (!snapshot.exists()) {
+          setAvailabilityByItemId({});
+          setStockDataLoaded(true);
+          return;
+        }
+        const data = snapshot.data() as BakeryDailyReconciliation;
+        const byItemId: Record<string, number> = {};
+        (data.lines || []).forEach((line) => {
+          if (line.itemId) {
+            byItemId[line.itemId] = line.closingExpected;
+          }
+        });
+        setAvailabilityByItemId(byItemId);
+        setStockDataLoaded(true);
+      }
+    );
+    return () => unsubscribe();
+  }, []);
 
   const activeCategory = useMemo(() => {
     if (bakeryCategories.length === 0) return null;
@@ -62,12 +123,32 @@ export const BakeryView: React.FC<BakeryViewProps> = ({
   const whatsappMessage = encodeURIComponent("Hello Kuci! What are today’s fresh bakery and pastry selections?");
 
   return (
-    <div className="px-4 py-8 space-y-8 animate-in slide-in-from-right-4 duration-500">
+    <div className="animate-in slide-in-from-right-4 duration-500">
       <CustomizerModal
         item={menuItemForModal}
         onClose={() => setSelectedBakeryItem(null)}
         onConfirm={handleCustomizationConfirm}
       />
+
+      {staffSession && (
+        <div className="sticky top-[72px] z-40 bg-[var(--color-primary)] text-white px-4 py-2.5 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[9px] font-black uppercase tracking-widest opacity-75">Building staff order</p>
+            <p className="text-xs font-semibold truncate">{staffSession.customerName || 'Customer'}</p>
+          </div>
+          <button
+            onClick={staffSession.onReturn}
+            className="flex-shrink-0 inline-flex items-center gap-1.5 rounded-full bg-white/20 hover:bg-white/30 border border-white/30 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-colors"
+          >
+            {staffSession.staffCartCount > 0
+              ? `Back to Order · ${staffSession.staffCartCount} item${staffSession.staffCartCount !== 1 ? 's' : ''}`
+              : 'Back to Staff Order'}
+            <ArrowRight className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+
+      <div className="px-4 py-8 space-y-8">
 
       <header className="text-center space-y-2">
         <h2 className="text-3xl font-serif">Bakery & Pastries</h2>
@@ -121,6 +202,9 @@ export const BakeryView: React.FC<BakeryViewProps> = ({
             {activeItems.map((item) => {
               const menuItem = adaptBakeryItemToMenuItem(item, categoryMap[item.bakeryCategoryId]);
               const isMadeToOrder = item.fulfillmentMode === 'made_to_order';
+              const rawQty = item.id in availabilityByItemId ? availabilityByItemId[item.id] : undefined;
+              const stockStatus = stockDataLoaded ? getStockStatus(rawQty) : 'unknown';
+              const isOutOfStock = stockStatus === 'out_of_stock';
 
               return (
                 <div key={item.id} className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-3xl p-4 shadow-sm space-y-3">
@@ -139,19 +223,34 @@ export const BakeryView: React.FC<BakeryViewProps> = ({
                         </span>
                       </div>
                       <p className="text-sm text-[var(--color-text-muted)] italic line-clamp-2">"{item.description}"</p>
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)] mt-2">
-                        {isMadeToOrder ? 'Made to order' : 'Ready to serve'}
-                      </p>
+                      <div className="flex items-center gap-2 mt-2">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]">
+                          {isMadeToOrder ? 'Made to order' : 'Ready to serve'}
+                        </p>
+                        {stockDataLoaded && (
+                          <StockBadge
+                            status={stockStatus}
+                            qty={stockStatus === 'low_stock' ? rawQty : undefined}
+                          />
+                        )}
+                      </div>
                     </div>
                   </div>
 
-                  <button
-                    onClick={() => setSelectedBakeryItem(item)}
-                    className="w-full flex items-center justify-center gap-2 bg-[var(--color-text)] text-white py-3.5 rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all active:scale-95"
-                  >
-                    <Plus className="w-4 h-4" />
-                    View & Add
-                  </button>
+                  {isOutOfStock ? (
+                    <div className="w-full flex flex-col items-center justify-center gap-1 bg-red-50 border border-red-200 text-red-600 py-3.5 rounded-2xl">
+                      <p className="font-black uppercase tracking-widest text-[10px]">Out of stock</p>
+                      <p className="text-[9px] text-red-400 uppercase tracking-wider">Check again later</p>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setSelectedBakeryItem(item)}
+                      className="w-full flex items-center justify-center gap-2 bg-[var(--color-text)] text-white py-3.5 rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all active:scale-95"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Add to Order
+                    </button>
+                  )}
                 </div>
               );
             })}
@@ -177,6 +276,7 @@ export const BakeryView: React.FC<BakeryViewProps> = ({
           Ask Today’s Specials
         </a>
       </section>
+      </div>
     </div>
   );
 };

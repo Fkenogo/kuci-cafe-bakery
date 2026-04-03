@@ -1,9 +1,15 @@
 
-import React, { useState, useMemo } from 'react';
-import { Plus, Info, Heart, Star, Utensils, Coffee, Pizza, Wine, GlassWater, Sandwich, Flame, Milk, Cherry, IceCream, Salad, Beer } from 'lucide-react';
+import React, { useEffect, useState, useMemo } from 'react';
+import { ArrowRight, Plus, Info, Heart, Star, Utensils, Coffee, Pizza, Wine, GlassWater, Sandwich, Flame, Milk, Cherry, IceCream, Salad, Beer } from 'lucide-react';
 import { Category, MenuItem, ItemCustomization } from '../types';
 import { CustomizerModal } from '../components/CustomizerModal';
 import { getMenuItemCategoryId, getMenuItemPriceLabel } from '../lib/catalog';
+
+interface StaffOrderSession {
+  customerName: string;
+  staffCartCount: number;
+  onReturn: () => void;
+}
 
 interface MenuViewProps {
   addToCart: (item: MenuItem, customization?: ItemCustomization) => void;
@@ -13,6 +19,7 @@ interface MenuViewProps {
   categories: Category[];
   selectedCategory: Category | null;
   setSelectedCategory: (cat: Category) => void;
+  staffSession?: StaffOrderSession;
 }
 
 const ICON_MAP: Record<string, React.ReactNode> = {
@@ -32,14 +39,15 @@ const ICON_MAP: Record<string, React.ReactNode> = {
   Beer: <Beer className="w-5 h-5" />,
 };
 
-export const MenuView: React.FC<MenuViewProps> = ({ 
-  addToCart, 
-  wishlist, 
-  toggleWishlist, 
-  menuItems, 
+export const MenuView: React.FC<MenuViewProps> = ({
+  addToCart,
+  wishlist,
+  toggleWishlist,
+  menuItems,
   categories,
   selectedCategory,
-  setSelectedCategory
+  setSelectedCategory,
+  staffSession,
 }) => {
   const [customizingItem, setCustomizingItem] = useState<MenuItem | null>(null);
 
@@ -47,8 +55,19 @@ export const MenuView: React.FC<MenuViewProps> = ({
 
   const filteredItems = useMemo(() => {
     if (!activeCategory) return [];
-    return menuItems.filter(item => getMenuItemCategoryId(item) === activeCategory.id);
+    return menuItems.filter((item) => getMenuItemCategoryId(item) === activeCategory.id);
   }, [activeCategory, menuItems]);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    console.debug('[menu-view] category filter snapshot', {
+      totalCategories: categories.length,
+      totalItems: menuItems.length,
+      selectedCategoryId: activeCategory?.id || null,
+      selectedCategoryName: activeCategory?.name || null,
+      filteredCount: filteredItems.length,
+    });
+  }, [activeCategory?.id, activeCategory?.name, categories.length, filteredItems.length, menuItems.length]);
 
   const handleCustomizationConfirm = (item: MenuItem, customization: ItemCustomization) => {
     addToCart(item, customization);
@@ -64,13 +83,31 @@ export const MenuView: React.FC<MenuViewProps> = ({
 
   return (
     <div className="flex flex-col h-full animate-in fade-in duration-500">
-      <CustomizerModal 
+      <CustomizerModal
         item={customizingItem}
         onClose={() => setCustomizingItem(null)}
         onConfirm={handleCustomizationConfirm}
       />
 
-      <div className="sticky top-16 z-30 bg-[var(--color-bg)]/95 backdrop-blur-md border-b border-[var(--color-border)] py-4">
+      {staffSession && (
+        <div className="sticky top-[72px] z-40 bg-[var(--color-primary)] text-white px-4 py-2.5 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[9px] font-black uppercase tracking-widest opacity-75">Building staff order</p>
+            <p className="text-xs font-semibold truncate">{staffSession.customerName || 'Customer'}</p>
+          </div>
+          <button
+            onClick={staffSession.onReturn}
+            className="flex-shrink-0 inline-flex items-center gap-1.5 rounded-full bg-white/20 hover:bg-white/30 border border-white/30 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-colors"
+          >
+            {staffSession.staffCartCount > 0
+              ? `Back to Order · ${staffSession.staffCartCount} item${staffSession.staffCartCount !== 1 ? 's' : ''}`
+              : 'Back to Staff Order'}
+            <ArrowRight className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+
+      <div className={`sticky ${staffSession ? 'top-[116px]' : 'top-16'} z-30 bg-[var(--color-bg)]/95 backdrop-blur-md border-b border-[var(--color-border)] py-4`}>
         <div className="flex gap-3 overflow-x-auto no-scrollbar px-4">
           {categories.map((cat) => (
             <button

@@ -142,6 +142,69 @@ export function getMenuItemCategoryId(item: Partial<MenuItem> | null | undefined
   return item.categoryId || item.category || '';
 }
 
+function normalizeCategoryToken(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function expandCategoryTokens(baseToken: string): string[] {
+  if (!baseToken) return [];
+  const expanded = new Set<string>([baseToken]);
+  const parts = baseToken.split('-').filter(Boolean);
+  parts.forEach((part) => expanded.add(part));
+  if (parts.includes('and')) {
+    expanded.add(parts.filter((part) => part !== 'and').join('-'));
+  }
+  return Array.from(expanded);
+}
+
+export function getMenuItemCategoryTokens(item: Partial<MenuItem> | null | undefined): Set<string> {
+  const tokens = new Set<string>();
+  if (!item) return tokens;
+
+  const add = (value: unknown) => {
+    const token = normalizeCategoryToken(value);
+    expandCategoryTokens(token).forEach((expandedToken) => tokens.add(expandedToken));
+  };
+
+  add(item.categoryId);
+  add(item.category);
+  add(item.categoryName);
+  return tokens;
+}
+
+export function getCategoryTokens(category: Partial<Category> | null | undefined): Set<string> {
+  const tokens = new Set<string>();
+  if (!category) return tokens;
+  const add = (value: unknown) => {
+    const token = normalizeCategoryToken(value);
+    expandCategoryTokens(token).forEach((expandedToken) => tokens.add(expandedToken));
+  };
+  add(category.id);
+  add(category.slug);
+  add(category.name);
+  return tokens;
+}
+
+export function menuItemMatchesCategory(
+  item: Partial<MenuItem> | null | undefined,
+  category: Partial<Category> | null | undefined
+): boolean {
+  const itemTokens = getMenuItemCategoryTokens(item);
+  if (itemTokens.size === 0) return false;
+  const categoryTokens = getCategoryTokens(category);
+  if (categoryTokens.size === 0) return false;
+  for (const token of itemTokens) {
+    if (categoryTokens.has(token)) return true;
+  }
+  return false;
+}
+
 export function getMenuItemBasePrice(item: Partial<MenuItem> | null | undefined): number | null {
   if (!item) return null;
   if (isFiniteNumber(item.basePrice) && item.basePrice >= 0) return item.basePrice;

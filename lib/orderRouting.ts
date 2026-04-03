@@ -1,11 +1,15 @@
 import { serverTimestamp } from 'firebase/firestore';
 import {
+  FinancialStatus,
   FulfillmentMode,
   FrontLane,
   MenuItem,
   MenuPrepStation,
+  OrderPaymentRecord,
+  OrderPaymentStatus,
   OrderStatus,
   OrderServiceArea,
+  PaymentMethod,
   PersistedOrder,
   PersistedOrderItem,
   PersistedOrderTask,
@@ -118,6 +122,59 @@ function normalizeLegacyOverallStatus(status: unknown): OrderStatus | null {
   if (status === 'preparing') return 'in_progress';
   if (status === 'ready') return 'ready_for_handover';
   return null;
+}
+
+function normalizePaymentMethod(value: unknown): PaymentMethod | null {
+  if (value === 'cash' || value === 'mobile_money' || value === 'bank_transfer' || value === 'other') {
+    return value;
+  }
+  return null;
+}
+
+function normalizeOrderPaymentStatus(value: unknown): OrderPaymentStatus {
+  if (value === 'paid' || value === 'complimentary' || value === 'credit' || value === 'pending') {
+    return value;
+  }
+  return 'pending';
+}
+
+function normalizeFinancialStatus(value: unknown): FinancialStatus | undefined {
+  if (value === 'unpaid' || value === 'paid' || value === 'complimentary' || value === 'credit') {
+    return value;
+  }
+  return undefined;
+}
+
+function normalizeOrderPayment(value: unknown): OrderPaymentRecord | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const record = value as Record<string, unknown>;
+  const amountReceived = typeof record.amountReceived === 'number' && Number.isFinite(record.amountReceived)
+    ? Math.max(0, record.amountReceived)
+    : 0;
+  const method = normalizePaymentMethod(record.method);
+  const recordedBy = normalizeStaffIdentity(record.recordedBy);
+
+  return {
+    method,
+    amountReceived,
+    currency: typeof record.currency === 'string' && record.currency.trim().length > 0 ? record.currency : 'RWF',
+    isComplimentary: record.isComplimentary === true,
+    isCredit: record.isCredit === true,
+    recordedBy: recordedBy || null,
+    recordedAt: normalizeDate(record.recordedAt),
+  };
+}
+
+function normalizeOrderReceipt(value: unknown): PersistedOrder['receipt'] | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const record = value as Record<string, unknown>;
+  if (typeof record.receiptNumber !== 'string' || record.receiptNumber.trim().length === 0) return undefined;
+  if (!record.generatedAt) return undefined;
+  return {
+    receiptNumber: record.receiptNumber.trim(),
+    generatedAt: record.generatedAt,
+    visibleToCustomer: record.visibleToCustomer === true,
+  };
 }
 
 function normalizeLegacyStationStatus(status: unknown): StationOrderStatus | null {
@@ -351,6 +408,25 @@ export function normalizeLiveOrder(id: string, value: unknown): LiveOrder | null
   const createdAt = normalizeDate(record.createdAt);
   const updatedAt = normalizeDate(record.updatedAt);
   const businessDate = normalizeBusinessDate(record.businessDate, createdAt || updatedAt);
+  const payment = normalizeOrderPayment(record.payment);
+  const financialStatus = normalizeFinancialStatus(record.financialStatus);
+  const receipt = normalizeOrderReceipt(record.receipt);
+  const loyaltyRedemption =
+    record.loyaltyRedemption && typeof record.loyaltyRedemption === 'object'
+      ? (() => {
+          const lr = record.loyaltyRedemption as Record<string, unknown>;
+          const requestedAmount = typeof lr.requestedAmount === 'number' && Number.isFinite(lr.requestedAmount) ? Math.max(0, lr.requestedAmount) : 0;
+          const appliedAmount = typeof lr.appliedAmount === 'number' && Number.isFinite(lr.appliedAmount) ? Math.max(0, lr.appliedAmount) : 0;
+          const blockSize = typeof lr.blockSize === 'number' && Number.isFinite(lr.blockSize) ? Math.max(0, lr.blockSize) : 1000;
+          if (blockSize <= 0) return undefined;
+          return {
+            selectedByCustomer: lr.selectedByCustomer === true,
+            requestedAmount,
+            appliedAmount,
+            blockSize,
+          };
+        })()
+      : undefined;
 
   return {
     id,
@@ -358,11 +434,35 @@ export function normalizeLiveOrder(id: string, value: unknown): LiveOrder | null
     updatedAt,
     ...(businessDate ? { businessDate } : {}),
     status,
-    paymentStatus: record.paymentStatus as 'pending',
+    paymentStatus: normalizeOrderPaymentStatus(record.paymentStatus),
+    ...(payment ? { payment } : {}),
+    ...(financialStatus ? { financialStatus } : {}),
+    ...(receipt ? { receipt } : {}),
+    ...(loyaltyRedemption ? { loyaltyRedemption } : {}),
     serviceMode: record.serviceMode as PersistedOrder['serviceMode'],
+    ...(record.orderEntryMode === 'customer_self' || record.orderEntryMode === 'staff_assisted'
+      ? { orderEntryMode: record.orderEntryMode }
+      : {}),
+    ...(record.orderSource === 'walk_in' || record.orderSource === 'phone_call' || record.orderSource === 'whatsapp' || record.orderSource === 'other'
+      ? { orderSource: record.orderSource }
+      : {}),
+    ...(record.checkoutPaymentChoice === 'cash' || record.checkoutPaymentChoice === 'mobile_money' || record.checkoutPaymentChoice === 'whatsapp'
+      ? { checkoutPaymentChoice: record.checkoutPaymentChoice }
+      : {}),
     serviceArea,
     frontLane,
     dispatchMode,
+    ...(typeof record.createdByStaffUid === 'string' && record.createdByStaffUid.trim().length > 0
+      ? { createdByStaffUid: record.createdByStaffUid.trim() }
+      : {}),
+    ...(record.createdByStaffRole === 'admin' || record.createdByStaffRole === 'front_service' || record.createdByStaffRole === 'bakery_front_service'
+      ? { createdByStaffRole: record.createdByStaffRole }
+      : {}),
+    ...(typeof record.createdByStaffName === 'string' && record.createdByStaffName.trim().length > 0
+      ? { createdByStaffName: record.createdByStaffName.trim() }
+      : {}),
+    ...(typeof record.assistedCustomerName === 'string' ? { assistedCustomerName: record.assistedCustomerName } : {}),
+    ...(typeof record.assistedCustomerPhoneNormalized === 'string' ? { assistedCustomerPhoneNormalized: record.assistedCustomerPhoneNormalized } : {}),
     customer: {
       name: customer.name,
       phone: customer.phone,

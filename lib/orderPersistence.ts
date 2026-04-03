@@ -15,11 +15,13 @@ import {
   PersistedOrderItem,
   PersistedOrderTask,
   PrepStation,
+  UserRole,
   UserProfile,
 } from '../types';
 import { getCartItemUnitPrice, summarizeSelectedModifiers } from './catalog';
 import { toBusinessDate } from './businessDate';
 import { mapMenuPrepStationToPrepStation, mapMenuStationToPrepStation } from './orderRouting';
+import { normalizePhoneForRewardKey } from './customerRewards';
 
 const MAX_NOTES_LENGTH = 500;
 
@@ -270,6 +272,22 @@ export interface CreateOrderInput {
   deliveryFee: number;
   total: number;
   userId?: string | null;
+  checkoutPaymentChoice?: 'cash' | 'mobile_money' | 'whatsapp';
+  loyaltyRedemption?: {
+    selectedByCustomer: boolean;
+    requestedAmount: number;
+    appliedAmount: number;
+    blockSize: number;
+  };
+  entry?: {
+    orderEntryMode: 'customer_self' | 'staff_assisted';
+    orderSource?: 'walk_in' | 'phone_call' | 'whatsapp' | 'other';
+    createdByStaff?: {
+      uid: string;
+      role: Exclude<UserRole, 'user'>;
+      name: string;
+    } | null;
+  };
 }
 
 export interface CreateOrderResult {
@@ -277,7 +295,7 @@ export interface CreateOrderResult {
   order: PersistedOrder;
 }
 
-export function validateOrderInput(input: CreateOrderInput): { valid: true; items: PersistedOrderItem[]; notes: string } | { valid: false; message: string } {
+export function validateOrderInput(input: CreateOrderInput): { valid: true; items: PersistedOrderItem[]; notes: string; entryMode: 'customer_self' | 'staff_assisted'; customerName: string; customerPhone: string; customerPhoneNormalized: string } | { valid: false; message: string } {
   const items = sanitizeOrderItems(input.cart);
   if (items.length === 0) {
     return { valid: false, message: 'Your cart is empty or contains invalid items.' };
@@ -300,15 +318,51 @@ export function validateOrderInput(input: CreateOrderInput): { valid: true; item
     return { valid: false, message: 'Order total is invalid.' };
   }
 
+  const checkoutPaymentChoice = input.checkoutPaymentChoice || 'cash';
+  if (!['cash', 'mobile_money', 'whatsapp'].includes(checkoutPaymentChoice)) {
+    return { valid: false, message: 'Checkout payment choice is invalid.' };
+  }
+
+  if (input.loyaltyRedemption) {
+    const requested = Number.isFinite(input.loyaltyRedemption.requestedAmount) ? Math.max(0, input.loyaltyRedemption.requestedAmount) : 0;
+    const applied = Number.isFinite(input.loyaltyRedemption.appliedAmount) ? Math.max(0, input.loyaltyRedemption.appliedAmount) : 0;
+    const isSelected = input.loyaltyRedemption.selectedByCustomer === true;
+    const blockSize = input.loyaltyRedemption.blockSize || 1000;
+    if (blockSize !== 1000) {
+      return { valid: false, message: 'Loyalty redemption block size is invalid.' };
+    }
+    if (requested % 1000 !== 0 || applied % 1000 !== 0) {
+      return { valid: false, message: 'Loyalty redemption must be in 1,000 RWF blocks.' };
+    }
+    if (!isSelected && (requested !== 0 || applied !== 0)) {
+      return { valid: false, message: 'Loyalty redemption is invalid.' };
+    }
+    if (applied > requested || applied > input.total) {
+      return { valid: false, message: 'Loyalty redemption exceeds allowed amount.' };
+    }
+  }
+
   const customerName = normalizeString(input.userProfile.name);
   const customerPhone = normalizeString(input.userProfile.phone);
-  if (customerName.length < 3 || customerPhone.length < 10) {
-    return { valid: false, message: 'Please provide a valid name and phone number.' };
+  const customerPhoneNormalized = normalizePhoneForRewardKey(customerPhone);
+  const entryMode = input.entry?.orderEntryMode === 'staff_assisted' ? 'staff_assisted' : 'customer_self';
+  if (entryMode === 'customer_self') {
+    if (customerName.length < 3 || customerPhone.length < 10) {
+      return { valid: false, message: 'Please provide a valid name and phone number.' };
+    }
+  } else if (customerName.length < 3 && customerPhone.length < 10) {
+    return { valid: false, message: 'For staff-assisted entry, provide at least a customer name or phone.' };
+  }
+
+  if (entryMode === 'staff_assisted') {
+    if (!input.entry?.createdByStaff?.uid || !input.entry.createdByStaff?.name || !input.entry.createdByStaff?.role) {
+      return { valid: false, message: 'Staff-assisted orders require staff identity metadata.' };
+    }
   }
 
   const notes = input.orderType === OrderType.DELIVERY ? normalizeString(input.deliveryArea).slice(0, MAX_NOTES_LENGTH) : '';
 
-  return { valid: true, items, notes };
+  return { valid: true, items, notes, entryMode, customerName, customerPhone, customerPhoneNormalized };
 }
 
 export async function createOrder(input: CreateOrderInput): Promise<CreateOrderResult> {
@@ -326,19 +380,51 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     businessDate: toBusinessDate(),
     status: 'pending',
     paymentStatus: 'pending',
+    payment: {
+      method: null,
+      amountReceived: 0,
+      currency: 'RWF',
+      isComplimentary: false,
+      isCredit: false,
+      recordedBy: null,
+      recordedAt: null,
+    },
+    financialStatus: 'unpaid',
     serviceMode: toServiceMode(input.orderType),
     serviceArea: operationalRouting.serviceArea,
     frontLane: operationalRouting.frontLane,
     dispatchMode: operationalRouting.dispatchMode,
+    orderEntryMode: validation.entryMode,
+    ...(validation.entryMode === 'staff_assisted'
+      ? {
+          orderSource: input.entry?.orderSource || 'walk_in',
+          createdByStaffUid: input.entry?.createdByStaff?.uid as string,
+          createdByStaffRole: input.entry?.createdByStaff?.role as Exclude<UserRole, 'user'>,
+          createdByStaffName: normalizeString(input.entry?.createdByStaff?.name),
+          assistedCustomerName: validation.customerName,
+          assistedCustomerPhoneNormalized: validation.customerPhoneNormalized || '',
+        }
+      : {}),
     customer: {
-      name: normalizeString(input.userProfile.name),
-      phone: normalizeString(input.userProfile.phone),
+      name: validation.customerName,
+      phone: validation.customerPhone,
       ...(validation.notes ? { location: validation.notes } : {}),
     },
     items: validation.items,
     subtotal: input.subtotal,
     deliveryFee: input.deliveryFee,
     total: input.total,
+    ...(input.loyaltyRedemption
+      ? {
+          loyaltyRedemption: {
+            selectedByCustomer: input.loyaltyRedemption.selectedByCustomer === true,
+            requestedAmount: Number.isFinite(input.loyaltyRedemption.requestedAmount) ? Math.max(0, input.loyaltyRedemption.requestedAmount) : 0,
+            appliedAmount: Number.isFinite(input.loyaltyRedemption.appliedAmount) ? Math.max(0, input.loyaltyRedemption.appliedAmount) : 0,
+            blockSize: 1000,
+          },
+        }
+      : {}),
+    checkoutPaymentChoice: input.checkoutPaymentChoice || 'cash',
     notes: validation.notes,
     routedTasks,
     involvedStations: Array.from(new Set(
