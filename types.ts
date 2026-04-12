@@ -80,6 +80,9 @@ export interface BakeryItem {
   hiddenFromCustomer?: boolean;
   deprecated?: boolean;
   legacySource?: string;
+  reviews?: Review[];
+  averageRating?: number;
+  ratingCount?: number;
   variants?: MenuVariant[];
   modifierGroups?: ModifierGroup[];
   prepInstructionsEnabled?: boolean;
@@ -167,6 +170,7 @@ export interface MenuItem {
   note?: string;
   reviews?: Review[];
   averageRating?: number;
+  ratingCount?: number;
   imageUrl?: string;
   active: boolean;
   isAvailable: boolean;
@@ -471,6 +475,32 @@ export interface PersistedOrder {
   recoveryReason?: 'stale_recovery_complete' | 'stale_recovery_cancel' | 'stale_recovery_carry_forward';
   recoveryUpdatedAt?: unknown;
   recoveryUpdatedBy?: StaffIdentity | null;
+}
+
+export interface ItemRating {
+  id: string;
+  orderId: string;
+  itemId: string;
+  itemName: string;
+  serviceArea: ItemServiceArea;
+  stars: number;
+  comment?: string;
+  customerDisplayName: string;
+  userId: string;
+  quantityPurchased?: number;
+  businessDate?: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
+
+export interface ItemRatingAggregate {
+  id: string;
+  itemId: string;
+  serviceArea: ItemServiceArea;
+  averageRating: number;
+  ratingCount: number;
+  reviews: Review[];
+  updatedAt?: unknown;
 }
 
 export interface BakeryStockSku {

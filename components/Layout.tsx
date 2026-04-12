@@ -17,6 +17,7 @@ interface LayoutProps {
   activePath: string;
   navigate: (path: string) => void;
   tabs: LayoutTab[];
+  mobileTabs?: LayoutTab[];
   cartCount: number;
   userPhoto?: string;
   user: FirebaseUser | null;
@@ -37,6 +38,7 @@ export const Layout: React.FC<LayoutProps> = ({
   activePath,
   navigate,
   tabs,
+  mobileTabs,
   cartCount,
   userPhoto,
   user,
@@ -65,6 +67,7 @@ export const Layout: React.FC<LayoutProps> = ({
     ? (isDesktopViewport ? 'desktop' : 'mobile')
     : managementViewMode;
   const isDesktopManagementShell = showManagementViewControls && resolvedManagementMode === 'desktop';
+  const displayedTabs = isDesktopManagementShell ? tabs : (mobileTabs || tabs);
 
   // Trigger animation when cart count increases
   useEffect(() => {
@@ -174,7 +177,7 @@ export const Layout: React.FC<LayoutProps> = ({
         isDesktopManagementShell ? 'max-w-[1440px]' : 'max-w-md'
       }`}>
         <div className="flex items-center justify-around py-2 px-1">
-          {tabs.map((tab) => {
+          {displayedTabs.map((tab) => {
             const isActive = activePath === tab.path;
             const isCart = tab.path === '/orders';
             const Icon = tab.icon;

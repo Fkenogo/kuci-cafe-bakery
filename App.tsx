@@ -98,6 +98,37 @@ function buildAccessibleStaffTabs(role: UserRole | undefined, isActive = true): 
   return tabs;
 }
 
+function buildMobileStaffTabs(role: UserRole | undefined, isActive = true): LayoutTab[] {
+  if (!isActive) return [];
+  if (role === 'admin') {
+    return [
+      { path: '/admin/orders', icon: Shield, label: 'Orders' },
+      { path: '/staff/orders/create', icon: ShoppingBag, label: 'Create' },
+      { path: '/info', icon: Info, label: 'Info' },
+    ];
+  }
+  if (role === 'front_service') {
+    return [
+      { path: '/front/orders', icon: ShoppingBag, label: 'Front' },
+      { path: '/staff/orders/create', icon: ShoppingBag, label: 'Create' },
+      { path: '/info', icon: Info, label: 'Info' },
+    ];
+  }
+  if (role === 'bakery_front_service') {
+    return [
+      { path: '/bakery-front/orders', icon: Cookie, label: 'Bakery' },
+      { path: '/staff/orders/create', icon: ShoppingBag, label: 'Create' },
+      { path: '/info', icon: Info, label: 'Info' },
+    ];
+  }
+  if (role === 'kitchen') return [{ path: '/kitchen/orders', icon: Utensils, label: 'Kitchen' }, { path: '/info', icon: Info, label: 'Info' }];
+  if (role === 'barista') return [{ path: '/barista/orders', icon: Coffee, label: 'Barista' }, { path: '/info', icon: Info, label: 'Info' }];
+  if (role === 'bakery_account_reconciliation' || role === 'cafe_account_reconciliation') {
+    return [{ path: '/reconciliation', icon: ClipboardCheck, label: 'Reconcile' }, { path: '/info', icon: Info, label: 'Info' }];
+  }
+  return [{ path: '/info', icon: Info, label: 'Info' }];
+}
+
 function isOperationalRole(role: UserRole | undefined): boolean {
   return role === 'admin' ||
     role === 'front_service' ||
@@ -538,6 +569,15 @@ const App: React.FC = () => {
     ...(accessibleStaffTabs.length > 0 ? [accessibleStaffTabs[0]] : []),
   ];
   const activeTabs = isStaffPath ? [{ path: '/', icon: Home, label: 'Home' }, ...accessibleStaffTabs] : customerTabs;
+  const mobileTabs: LayoutTab[] = isStaffPath
+    ? [{ path: '/', icon: Home, label: 'Home' }, ...buildMobileStaffTabs(appUser?.role, appUser?.isActive ?? false)]
+    : [
+        { path: '/', icon: Home, label: 'Home' },
+        { path: '/menu', icon: MenuIcon, label: 'Menu' },
+        { path: '/bakery', icon: Cookie, label: 'Bakery' },
+        { path: '/orders', icon: ShoppingBag, label: 'Orders', badge: cart.reduce((acc, i) => acc + i.quantity, 0) },
+        { path: '/info', icon: Info, label: 'Info' },
+      ];
   const showManagementViewControls = isStaffPath && !isAdminCustomerMode && !!appUser && appUser.role !== 'user';
   const showStaffShortcutOnCustomerView =
     !isStaffPath &&
@@ -648,7 +688,14 @@ const App: React.FC = () => {
           />
         )
       );
-      case '/info': return <InfoView settings={settings} />;
+      case '/info': return (
+        <InfoView
+          settings={settings}
+          appUser={appUser}
+          onOpenStaffAccess={() => navigate('/admin/login')}
+          onNavigateWorkspace={(path) => navigate(path)}
+        />
+      );
       case '/auth': return (
         <CustomerAuthView
           user={user}
@@ -738,6 +785,7 @@ const App: React.FC = () => {
       activePath={currentPath}
       navigate={navigate}
       tabs={activeTabs}
+      mobileTabs={mobileTabs}
       cartCount={((staffOrderBuildSession || isStaffPath) ? staffCart : cart).reduce((acc, i) => acc + i.quantity, 0)}
       userPhoto={userProfile.photo}
       user={user}

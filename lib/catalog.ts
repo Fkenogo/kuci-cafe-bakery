@@ -552,6 +552,9 @@ export function adaptBakeryItemToMenuItem(item: BakeryItem, category?: BakeryCat
     serviceArea: 'bakery',
     imageUrl: item.imageUrl,
     sortOrder: item.sortOrder,
+    averageRating: item.averageRating,
+    ratingCount: item.ratingCount,
+    reviews: item.reviews,
     ...(item.variants ? { variants: item.variants } : {}),
     ...(item.modifierGroups ? { modifierGroups: item.modifierGroups } : {}),
   };

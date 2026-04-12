@@ -693,6 +693,124 @@ service cloud.firestore {
       return status in ['pending', 'front_accepted', 'in_progress', 'ready_for_handover', 'completed', 'rejected'];
     }
 
+    function isValidItemRatingServiceArea(serviceArea) {
+      return serviceArea in ['cafe', 'bakery'];
+    }
+
+    function isValidItemRating(data) {
+      return data.keys().hasAll([
+               'orderId',
+               'itemId',
+               'itemName',
+               'serviceArea',
+               'stars',
+               'comment',
+               'customerDisplayName',
+               'userId',
+               'quantityPurchased',
+               'businessDate',
+               'createdAt',
+               'updatedAt'
+             ]) &&
+             data.keys().hasOnly([
+               'orderId',
+               'itemId',
+               'itemName',
+               'serviceArea',
+               'stars',
+               'comment',
+               'customerDisplayName',
+               'userId',
+               'quantityPurchased',
+               'businessDate',
+               'createdAt',
+               'updatedAt'
+             ]) &&
+             data.orderId is string && data.orderId.size() > 0 &&
+             data.itemId is string && data.itemId.size() > 0 &&
+             data.itemName is string && data.itemName.size() > 0 &&
+             isValidItemRatingServiceArea(data.serviceArea) &&
+             data.stars is number && data.stars >= 1 && data.stars <= 5 &&
+             data.comment is string && data.comment.size() <= 500 &&
+             data.customerDisplayName is string && data.customerDisplayName.size() > 0 && data.customerDisplayName.size() <= 120 &&
+             data.userId is string && data.userId == request.auth.uid &&
+             data.quantityPurchased is number && data.quantityPurchased > 0 &&
+             data.businessDate is string && data.businessDate.matches("^\\d{4}-\\d{2}-\\d{2}$") &&
+             data.createdAt is timestamp &&
+             data.updatedAt is timestamp;
+    }
+
+    function ratingTargetsOwnedCompletedSelfOrder(data) {
+      return exists(/databases/$(database)/documents/orders/$(data.orderId)) &&
+             get(/databases/$(database)/documents/orders/$(data.orderId)).data.userId == request.auth.uid &&
+             get(/databases/$(database)/documents/orders/$(data.orderId)).data.status == 'completed' &&
+             get(/databases/$(database)/documents/orders/$(data.orderId)).data.orderEntryMode == 'customer_self';
+    }
+
+    function isMatchingRatedOrderItem(item, data) {
+      return item is map &&
+             item.itemId == data.itemId &&
+             item.itemName == data.itemName &&
+             item.quantity == data.quantityPurchased &&
+             (!('serviceArea' in item) || item.serviceArea == data.serviceArea);
+    }
+
+    function ratingMatchesPurchasedOrderItem(data) {
+      let order = get(/databases/$(database)/documents/orders/$(data.orderId)).data;
+      return order.items is list && (
+        (order.items.size() > 0 && isMatchingRatedOrderItem(order.items[0], data)) ||
+        (order.items.size() > 1 && isMatchingRatedOrderItem(order.items[1], data)) ||
+        (order.items.size() > 2 && isMatchingRatedOrderItem(order.items[2], data)) ||
+        (order.items.size() > 3 && isMatchingRatedOrderItem(order.items[3], data)) ||
+        (order.items.size() > 4 && isMatchingRatedOrderItem(order.items[4], data)) ||
+        (order.items.size() > 5 && isMatchingRatedOrderItem(order.items[5], data)) ||
+        (order.items.size() > 6 && isMatchingRatedOrderItem(order.items[6], data)) ||
+        (order.items.size() > 7 && isMatchingRatedOrderItem(order.items[7], data)) ||
+        (order.items.size() > 8 && isMatchingRatedOrderItem(order.items[8], data)) ||
+        (order.items.size() > 9 && isMatchingRatedOrderItem(order.items[9], data)) ||
+        (order.items.size() > 10 && isMatchingRatedOrderItem(order.items[10], data)) ||
+        (order.items.size() > 11 && isMatchingRatedOrderItem(order.items[11], data)) ||
+        (order.items.size() > 12 && isMatchingRatedOrderItem(order.items[12], data)) ||
+        (order.items.size() > 13 && isMatchingRatedOrderItem(order.items[13], data)) ||
+        (order.items.size() > 14 && isMatchingRatedOrderItem(order.items[14], data)) ||
+        (order.items.size() > 15 && isMatchingRatedOrderItem(order.items[15], data)) ||
+        (order.items.size() > 16 && isMatchingRatedOrderItem(order.items[16], data)) ||
+        (order.items.size() > 17 && isMatchingRatedOrderItem(order.items[17], data)) ||
+        (order.items.size() > 18 && isMatchingRatedOrderItem(order.items[18], data)) ||
+        (order.items.size() > 19 && isMatchingRatedOrderItem(order.items[19], data))
+      );
+    }
+
+    function isValidItemRatingDocumentId(ratingId, data) {
+      return ratingId == data.orderId + '__' + data.serviceArea + '__' + data.itemId;
+    }
+
+    function isValidItemRatingCreate(ratingId) {
+      return isAuthenticated() &&
+             isValidItemRating(request.resource.data) &&
+             isValidItemRatingDocumentId(ratingId, request.resource.data) &&
+             ratingTargetsOwnedCompletedSelfOrder(request.resource.data) &&
+             ratingMatchesPurchasedOrderItem(request.resource.data);
+    }
+
+    function isValidItemRatingUpdate(ratingId) {
+      return isAuthenticated() &&
+             isOwner(resource.data.userId) &&
+             isValidItemRating(request.resource.data) &&
+             isValidItemRatingDocumentId(ratingId, request.resource.data) &&
+             resource.data.orderId == request.resource.data.orderId &&
+             resource.data.itemId == request.resource.data.itemId &&
+             resource.data.itemName == request.resource.data.itemName &&
+             resource.data.serviceArea == request.resource.data.serviceArea &&
+             resource.data.userId == request.resource.data.userId &&
+             resource.data.quantityPurchased == request.resource.data.quantityPurchased &&
+             resource.data.businessDate == request.resource.data.businessDate &&
+             request.resource.data.createdAt == resource.data.createdAt &&
+             request.resource.data.updatedAt is timestamp &&
+             ratingTargetsOwnedCompletedSelfOrder(request.resource.data) &&
+             ratingMatchesPurchasedOrderItem(request.resource.data);
+    }
+
     function isOrderCoreUnchanged() {
       return request.resource.data.createdAt == resource.data.createdAt &&
              request.resource.data.businessDate == resource.data.businessDate &&
@@ -1180,6 +1298,19 @@ service cloud.firestore {
         (isKitchen() && isValidKitchenUpdate()) ||
         (isBarista() && isValidBaristaUpdate());
       allow delete: if isAdmin();
+    }
+
+    match /itemRatings/{ratingId} {
+      allow create: if isValidItemRatingCreate(ratingId);
+      allow get: if canReadOperationalOrders() || (resource.data.userId is string && isOwner(resource.data.userId));
+      allow list: if canReadOperationalOrders();
+      allow update: if isValidItemRatingUpdate(ratingId);
+      allow delete: if isAdmin();
+    }
+
+    match /itemRatingAggregates/{aggregateId} {
+      allow get, list: if true;
+      allow create, update, delete: if false;
     }
 
     match /customerRewards/{rewardId} {

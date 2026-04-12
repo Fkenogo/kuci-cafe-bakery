@@ -1,11 +1,17 @@
 import { useState, useEffect } from 'react';
 import { db } from '../lib/firebase';
 import { collection, onSnapshot, doc } from 'firebase/firestore';
-import { BakeryCategory, BakeryItem, Category, MenuItem, RestaurantSettings } from '../types';
+import { BakeryCategory, BakeryItem, Category, ItemRatingAggregate, MenuItem, RestaurantSettings } from '../types';
 import { normalizeBakeryCategory, normalizeBakeryItem, normalizeMenuItem, normalizeRestaurantSettings } from '../lib/catalog';
 import { BASELINE_MENU_CATEGORIES, BASELINE_MENU_ITEMS, BASELINE_MENU_SOURCE } from '../lib/menuBaseline';
 import { SEED_BAKERY_CATEGORIES, SEED_BAKERY_ITEMS } from '../lib/seedData';
 import { applyCanonicalCustomerCategoryMapping } from '../lib/customerCategoryMapping';
+import {
+  ITEM_RATING_AGGREGATES_COLLECTION,
+  buildItemRatingAggregateId,
+  getEmptyItemRatingAggregate,
+  normalizeItemRatingAggregate,
+} from '../lib/itemRatings';
 
 function normalizeToken(value: unknown): string {
   if (typeof value !== 'string') return '';
@@ -131,17 +137,49 @@ export function useRestaurantData() {
     let latestVisibleMenuItems: MenuItem[] = [...BASELINE_MENU_ITEMS]
       .filter(isVisibleMenuItem)
       .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+    let latestVisibleBakeryItems: BakeryItem[] = BASELINE_BAKERY_ITEMS
+      .filter(isVisibleBakeryItem)
+      .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+    let latestRatingAggregatesById: Record<string, ItemRatingAggregate> = {};
+
+    const applyMenuRatingAggregates = (items: MenuItem[]): MenuItem[] => {
+      return items.map((item) => {
+        const serviceArea = item.serviceArea === 'bakery' ? 'bakery' : 'cafe';
+        const aggregate = latestRatingAggregatesById[buildItemRatingAggregateId(serviceArea, item.id)]
+          || getEmptyItemRatingAggregate(item.id, serviceArea);
+        return {
+          ...item,
+          averageRating: aggregate.averageRating || undefined,
+          ratingCount: aggregate.ratingCount,
+          reviews: aggregate.reviews,
+        };
+      });
+    };
+
+    const applyBakeryRatingAggregates = (items: BakeryItem[]): BakeryItem[] => {
+      return items.map((item) => {
+        const aggregate = latestRatingAggregatesById[buildItemRatingAggregateId('bakery', item.id)]
+          || getEmptyItemRatingAggregate(item.id, 'bakery');
+        return {
+          ...item,
+          averageRating: aggregate.averageRating || undefined,
+          ratingCount: aggregate.ratingCount,
+          reviews: aggregate.reviews,
+        };
+      });
+    };
 
     const publishCanonicalCustomerCatalog = () => {
-      const canonical = applyCanonicalCustomerCategoryMapping(latestVisibleCategories, latestVisibleMenuItems);
+      const canonical = applyCanonicalCustomerCategoryMapping(latestVisibleCategories, applyMenuRatingAggregates(latestVisibleMenuItems));
       setCategories(canonical.categories);
       setMenuItems(canonical.items.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0)));
+      setBakeryItems(applyBakeryRatingAggregates(latestVisibleBakeryItems).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0)));
     };
 
     let loadedSources = 0;
     const markLoaded = () => {
       loadedSources += 1;
-      if (loadedSources >= 5) setLoading(false);
+      if (loadedSources >= 6) setLoading(false);
     };
     
     // Fetch Settings
@@ -223,10 +261,26 @@ export function useRestaurantData() {
         return normalized ? [normalized] : [];
       });
 
-      const merged = mergeByTokens(BASELINE_BAKERY_ITEMS, firestoreItems, bakeryItemTokens)
+      const merged = mergeByTokens<BakeryItem>(BASELINE_BAKERY_ITEMS, firestoreItems, bakeryItemTokens)
         .filter(isVisibleBakeryItem)
         .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
-      setBakeryItems(merged);
+      latestVisibleBakeryItems = merged;
+      publishCanonicalCustomerCatalog();
+      markLoaded();
+    }, (err) => {
+      setError(err.message);
+      markLoaded();
+    });
+
+    const unsubItemRatingAggregates = onSnapshot(collection(db, ITEM_RATING_AGGREGATES_COLLECTION), (snapshot) => {
+      latestRatingAggregatesById = snapshot.docs.reduce((acc, aggregateDoc) => {
+        const normalized = normalizeItemRatingAggregate(aggregateDoc.id, aggregateDoc.data());
+        if (normalized) {
+          acc[aggregateDoc.id] = normalized;
+        }
+        return acc;
+      }, {} as Record<string, ItemRatingAggregate>);
+      publishCanonicalCustomerCatalog();
       markLoaded();
     }, (err) => {
       setError(err.message);
@@ -239,6 +293,7 @@ export function useRestaurantData() {
       unsubMenuItems();
       unsubBakeryCategories();
       unsubBakeryItems();
+      unsubItemRatingAggregates();
     };
   }, []);
 

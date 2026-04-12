@@ -1,14 +1,17 @@
 import React, { useState } from 'react';
-import { MapPin, Clock, Phone, MessageCircle, Wallet, ShieldCheck, Heart, Navigation, Truck, Info as InfoIcon, ExternalLink } from 'lucide-react';
+import { MapPin, Clock, Phone, MessageCircle, Wallet, ShieldCheck, Heart, Navigation, Truck, Info as InfoIcon, ExternalLink, Shield, UserCog } from 'lucide-react';
 import { DELIVERY_OPTIONS } from '../constants';
-import { DeliveryArea, DeliveryInfo, RestaurantSettings } from '../types';
+import { AppUserRecord, DeliveryArea, DeliveryInfo, RestaurantSettings } from '../types';
 import { getDeliveryOptions, getPhoneHref, getRestaurantContactInfo, getWhatsAppHref } from '../lib/catalog';
 
 interface InfoViewProps {
   settings: RestaurantSettings | null;
+  appUser?: AppUserRecord | null;
+  onOpenStaffAccess?: () => void;
+  onNavigateWorkspace?: (path: string) => void;
 }
 
-export const InfoView: React.FC<InfoViewProps> = ({ settings }) => {
+export const InfoView: React.FC<InfoViewProps> = ({ settings, appUser, onOpenStaffAccess, onNavigateWorkspace }) => {
   const [activeZone, setActiveZone] = useState<DeliveryArea>(DeliveryArea.NYAMATA_CENTRAL);
 
   if (!settings) return null;
@@ -22,6 +25,30 @@ export const InfoView: React.FC<InfoViewProps> = ({ settings }) => {
   const phoneHref = getPhoneHref(contactInfo.phone);
   const whatsappHref = getWhatsAppHref(contactInfo.whatsapp);
   const hasMomoInfo = !!contactInfo.momoPayCode;
+  const workspaceLinks = appUser?.isActive
+    ? appUser.role === 'admin'
+      ? [
+          { path: '/admin/orders', label: 'Admin Orders' },
+          { path: '/front/orders', label: 'Front' },
+          { path: '/bakery-front/orders', label: 'Bakery Front' },
+          { path: '/kitchen/orders', label: 'Kitchen' },
+          { path: '/barista/orders', label: 'Barista' },
+          { path: '/reconciliation', label: 'Reconciliation' },
+          { path: '/admin/catalog', label: 'Catalog' },
+          { path: '/admin/staff', label: 'Staff' },
+        ]
+      : appUser.role === 'front_service'
+        ? [{ path: '/front/orders', label: 'Front' }, { path: '/staff/orders/create', label: 'Create Order' }]
+        : appUser.role === 'bakery_front_service'
+          ? [{ path: '/bakery-front/orders', label: 'Bakery Front' }, { path: '/staff/orders/create', label: 'Create Order' }]
+          : appUser.role === 'kitchen'
+            ? [{ path: '/kitchen/orders', label: 'Kitchen' }]
+            : appUser.role === 'barista'
+              ? [{ path: '/barista/orders', label: 'Barista' }]
+              : appUser.role === 'bakery_account_reconciliation' || appUser.role === 'cafe_account_reconciliation'
+                ? [{ path: '/reconciliation', label: 'Reconciliation' }]
+                : []
+    : [];
 
   return (
     <div className="px-4 py-8 space-y-10 animate-in fade-in duration-500 pb-20">
@@ -262,6 +289,39 @@ export const InfoView: React.FC<InfoViewProps> = ({ settings }) => {
             Submit Feedback
           </button>
         </form>
+      </section>
+
+      <section className="bg-[var(--color-bg-secondary)] rounded-[32px] p-6 space-y-4 border border-[var(--color-border)]">
+        <div className="flex items-center gap-3">
+          <Shield className="w-5 h-5 text-[var(--color-primary)]" />
+          <h4 className="text-xl font-serif">Staff / Admin Access</h4>
+        </div>
+        <p className="text-sm text-[var(--color-text-muted)]">
+          Internal users can sign in here for operations dashboards.
+        </p>
+        <button
+          onClick={onOpenStaffAccess}
+          className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-[var(--color-primary)] text-white px-4 py-3 text-xs font-black uppercase tracking-widest"
+        >
+          <UserCog className="w-4 h-4" />
+          Staff / Admin Login
+        </button>
+        {workspaceLinks.length > 0 && onNavigateWorkspace && (
+          <div className="space-y-2 pt-1">
+            <p className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">Workspace</p>
+            <div className="grid grid-cols-2 gap-2">
+              {workspaceLinks.map((link) => (
+                <button
+                  key={link.path}
+                  onClick={() => onNavigateWorkspace(link.path)}
+                  className="rounded-xl border border-[var(--color-border)] bg-white px-3 py-2 text-[10px] font-black uppercase tracking-wider text-[var(--color-text)]"
+                >
+                  {link.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       <footer className="text-center space-y-8 pt-4 pb-10">

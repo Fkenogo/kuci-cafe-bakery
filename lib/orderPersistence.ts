@@ -1,5 +1,5 @@
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
-import { db } from './firebase';
+import { auth, db } from './firebase';
 import {
   CartItem,
   DeliveryArea,
@@ -373,6 +373,10 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
 
   const routedTasks = buildRoutedTasks(input.cart);
   const operationalRouting = classifyOrderOperationalRouting(validation.items, routedTasks);
+  const authenticatedUserId = auth.currentUser?.uid ?? null;
+  const persistedUserId = input.userId && authenticatedUserId && input.userId === authenticatedUserId
+    ? input.userId
+    : null;
 
   const order: PersistedOrder = {
     createdAt: serverTimestamp(),
@@ -414,16 +418,12 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
     subtotal: input.subtotal,
     deliveryFee: input.deliveryFee,
     total: input.total,
-    ...(input.loyaltyRedemption
-      ? {
-          loyaltyRedemption: {
-            selectedByCustomer: input.loyaltyRedemption.selectedByCustomer === true,
-            requestedAmount: Number.isFinite(input.loyaltyRedemption.requestedAmount) ? Math.max(0, input.loyaltyRedemption.requestedAmount) : 0,
-            appliedAmount: Number.isFinite(input.loyaltyRedemption.appliedAmount) ? Math.max(0, input.loyaltyRedemption.appliedAmount) : 0,
-            blockSize: 1000,
-          },
-        }
-      : {}),
+    loyaltyRedemption: {
+      selectedByCustomer: input.loyaltyRedemption?.selectedByCustomer === true,
+      requestedAmount: Number.isFinite(input.loyaltyRedemption?.requestedAmount) ? Math.max(0, input.loyaltyRedemption!.requestedAmount) : 0,
+      appliedAmount: Number.isFinite(input.loyaltyRedemption?.appliedAmount) ? Math.max(0, input.loyaltyRedemption!.appliedAmount) : 0,
+      blockSize: 1000,
+    },
     checkoutPaymentChoice: input.checkoutPaymentChoice || 'cash',
     notes: validation.notes,
     routedTasks,
@@ -433,8 +433,46 @@ export async function createOrder(input: CreateOrderInput): Promise<CreateOrderR
         .filter((station): station is PrepStation => !!station)
     )),
     stationStatus: {},
-    ...(input.userId ? { userId: input.userId } : {}),
+    frontAcceptedBy: null,
+    completedBy: null,
+    ...(persistedUserId ? { userId: persistedUserId } : {}),
   };
+
+  console.debug('orders-create payload audit', {
+    authUid: authenticatedUserId,
+    inputUserId: input.userId ?? null,
+    persistedUserId,
+    orderKeys: Object.keys(order).sort(),
+    fieldAudit: {
+      status: { value: order.status, type: typeof order.status },
+      serviceMode: { value: order.serviceMode, type: typeof order.serviceMode },
+      checkoutPaymentChoice: {
+        value: order.checkoutPaymentChoice ?? null,
+        type: typeof order.checkoutPaymentChoice,
+      },
+      orderEntryMode: { value: order.orderEntryMode ?? null, type: typeof order.orderEntryMode },
+      frontAcceptedBy: { value: order.frontAcceptedBy ?? null, type: order.frontAcceptedBy === null ? 'null' : typeof order.frontAcceptedBy },
+      completedBy: { value: order.completedBy ?? null, type: order.completedBy === null ? 'null' : typeof order.completedBy },
+      loyaltyRedemption: {
+        value: order.loyaltyRedemption ?? null,
+        type: order.loyaltyRedemption === null ? 'null' : typeof order.loyaltyRedemption,
+      },
+      items: {
+        count: Array.isArray(order.items) ? order.items.length : null,
+        firstItem: Array.isArray(order.items) && order.items.length > 0 ? order.items[0] : null,
+        type: Array.isArray(order.items) ? 'array' : typeof order.items,
+      },
+      subtotal: { value: order.subtotal, type: typeof order.subtotal },
+      total: { value: order.total, type: typeof order.total },
+      businessDate: { value: order.businessDate ?? null, type: typeof order.businessDate },
+      createdAt: { isServerTimestampSentinel: true },
+      updatedAt: { isServerTimestampSentinel: true },
+      userId: {
+        value: 'userId' in order ? order.userId ?? null : '__omitted__',
+        type: 'userId' in order ? (order.userId === null ? 'null' : typeof order.userId) : 'omitted',
+      },
+    },
+  });
 
   const docRef = await addDoc(collection(db, 'orders'), order);
   return { orderId: docRef.id, order };

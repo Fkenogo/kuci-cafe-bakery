@@ -11,6 +11,7 @@ import {
   getMenuItemPriceLabel,
   getMenuItemPrimaryImage,
 } from '../lib/catalog';
+import { getItemRatingSummaryForItem } from '../lib/itemRatings';
 
 interface HomeViewProps {
   onCategorySelect: (cat: Category) => void;
@@ -179,7 +180,9 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
                    <span className="text-[10px] font-black text-[var(--color-primary)] uppercase tracking-widest">Matching Items</span>
                    <span className="text-[10px] text-[var(--color-text)]/40 font-bold uppercase tracking-widest">{searchResults.length} results</span>
                 </div>
-                {searchResults.map((item) => (
+                {searchResults.map((item) => {
+                  const ratingSummary = getItemRatingSummaryForItem(item);
+                  return (
                   <div
                     key={item.id}
                     className="w-full flex items-center gap-4 px-6 py-4 hover:bg-[var(--color-primary)]/5 transition-colors border-b border-[var(--color-bg-secondary)]/50 last:border-none text-left group relative"
@@ -194,9 +197,9 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                            <h4 className="text-sm font-bold text-[var(--color-text)] truncate group-hover:text-[var(--color-primary)] transition-colors uppercase font-serif">{item.name}</h4>
-                           {item.averageRating && (                             <div className="flex items-center gap-0.5">
+                           {ratingSummary.hasRatings && (                             <div className="flex items-center gap-0.5">
                                <Star className="w-2.5 h-2.5 text-[var(--color-rating)] fill-[var(--color-rating)]" />
-                               <span className="text-[9px] font-black text-[var(--color-text-muted)]">{item.averageRating.toFixed(1)}</span>
+                               <span className="text-[9px] font-black text-[var(--color-text-muted)]">{ratingSummary.summaryLabel}</span>
                              </div>
                           )}
                         </div>
@@ -214,7 +217,7 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
                       <Heart className={`w-4 h-4 ${isInWishlist(item.id) ? 'fill-current' : ''}`} />
                     </button>
                   </div>
-                ))}
+                )})}
                 <div className="p-6 bg-[var(--color-primary)]/5 border-t border-[var(--color-bg-secondary)] text-center">
                   <button 
                      onClick={navigateToFullMenu}
@@ -277,7 +280,9 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
         </div>
         
         <div className="flex gap-5 overflow-x-auto no-scrollbar pb-4 -mx-4 px-4">
-          {baristaChoices.map((item) => (
+          {baristaChoices.map((item) => {
+            const ratingSummary = getItemRatingSummaryForItem(item);
+            return (
             <div 
               key={item.id} 
               className="min-w-[280px] bg-[var(--color-bg)] rounded-[40px] shadow-lg border border-[var(--color-primary)]/10 overflow-hidden flex flex-col group active:scale-[0.98] transition-all relative hover:shadow-2xl hover:-translate-y-1"
@@ -293,10 +298,10 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
                 <div className="absolute top-4 left-4 bg-[var(--color-primary)] text-white px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest">
                   {getMenuItemCategoryName(item, categories).replace('Café ', '')}
                 </div>
-                {item.averageRating && (
+                {ratingSummary.hasRatings && (
                   <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-[var(--color-bg)]/90 backdrop-blur-sm px-3 py-1 rounded-full flex items-center gap-1 shadow-lg">
                     <Star className="w-3 h-3 text-[var(--color-primary)] fill-[var(--color-primary)]" />
-                    <span className="text-[10px] font-black text-[var(--color-text)]">{item.averageRating.toFixed(1)}</span>
+                    <span className="text-[10px] font-black text-[var(--color-text)]">{ratingSummary.summaryLabel}</span>
                   </div>
                 )}
                 <div className="absolute bottom-4 right-4 bg-[var(--color-bg)]/95 backdrop-blur-md px-3 py-1.5 rounded-full text-[var(--color-text)] font-black text-xs shadow-md">
@@ -324,14 +329,16 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
                 </div>
               </div>
             </div>
-          ))}
+          )})}
         </div>
       </section>
 
       <section className="px-4">
         <h3 className="text-xl font-serif mb-5">Today's Specials</h3>
         <div className="flex gap-6 overflow-x-auto no-scrollbar pb-6 -mx-1 px-1">
-          {featured.map((item) => (
+          {featured.map((item) => {
+            const ratingSummary = getItemRatingSummaryForItem(item);
+            return (
             <div 
               key={item.id} 
               className="min-w-[280px] bg-[var(--color-bg)] rounded-[40px] shadow-xl border border-[var(--color-border)]/50 overflow-hidden flex flex-col relative active:scale-[0.98] transition-all hover:-translate-y-1"
@@ -346,10 +353,10 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
                 <div className="absolute top-4 right-4 bg-[var(--color-bg)]/95 backdrop-blur-md px-4 py-1.5 rounded-full text-[var(--color-primary)] font-black text-xs shadow-lg">
                   {getMenuItemPriceLabel(item)}
                 </div>
-                {item.averageRating && (
+                {ratingSummary.hasRatings && (
                   <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-[var(--color-primary)] px-3 py-1 rounded-full flex items-center gap-1 shadow-xl">
                     <Star className="w-3 h-3 text-white fill-white" />
-                    <span className="text-[10px] font-black text-white">{item.averageRating.toFixed(1)}</span>
+                    <span className="text-[10px] font-black text-white">{ratingSummary.summaryLabel}</span>
                   </div>
                 )}
                 {item.tagline && (
@@ -376,7 +383,7 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
                 </div>
               </div>
             </div>
-          ))}
+          )})}
         </div>
       </section>
 
@@ -391,7 +398,9 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
 
         {recentItems.length > 0 ? (
           <div className="flex gap-4 overflow-x-auto no-scrollbar pb-6 -mx-1 px-1">
-            {recentItems.map((item) => (
+            {recentItems.map((item) => {
+              const ratingSummary = getItemRatingSummaryForItem(item);
+              return (
               <div 
                 key={`recent-${item.id}`} 
                 className="min-w-[200px] bg-[var(--color-bg)] rounded-[32px] shadow-md border border-[var(--color-border)] overflow-hidden flex flex-col relative active:scale-[0.98] transition-all"
@@ -406,13 +415,18 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
                 <div className="p-4 flex flex-col flex-1">
                   <div className="flex items-center justify-between">
                     <h4 className="text-xs font-bold text-[var(--color-text)] font-serif uppercase line-clamp-1">{item.name}</h4>
-                    {item.averageRating && (
+                    {ratingSummary.hasRatings && (
                   <div className="flex items-center gap-0.5 ml-1">
                     <Star className="w-2.5 h-2.5 text-[var(--color-primary)] fill-[var(--color-primary)]" />
-                    <span className="text-[8px] font-black text-[var(--color-text-muted)]">{item.averageRating.toFixed(1)}</span>
+                    <span className="text-[8px] font-black text-[var(--color-text-muted)]">{ratingSummary.summaryLabel}</span>
                   </div>
                     )}
                   </div>
+                  {!ratingSummary.hasRatings && (
+                    <p className="mt-1 text-[8px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">
+                      {ratingSummary.summaryLabel}
+                    </p>
+                  )}
                   <p className="text-[9px] text-[var(--color-text)]/40 mt-1 line-clamp-1 italic">"{getMenuItemCategoryName(item, categories)}"</p>
                   <button 
                     className="mt-3 w-full bg-[var(--color-primary)]/10 text-[var(--color-primary)] py-2 rounded-xl text-[8px] font-black uppercase tracking-widest flex items-center justify-center gap-1.5"
@@ -421,7 +435,7 @@ export const HomeView: React.FC<HomeViewProps> = ({ onCategorySelect, addToCart,
                   </button>
                 </div>
               </div>
-            ))}
+            )})}
           </div>
         ) : (
           <div className="bg-[var(--color-bg-secondary)]/30 rounded-[40px] p-10 text-center border-2 border-dashed border-[var(--color-bg-secondary)] space-y-4 animate-in zoom-in-95 duration-500">

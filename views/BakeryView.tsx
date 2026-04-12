@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { ArrowRight, Cake, Coffee, Croissant, MessageCircle, Plus, Sandwich } from 'lucide-react';
+import { ArrowRight, Cake, Coffee, Croissant, MessageCircle, Plus, Sandwich, Star } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { toBusinessDate } from '../lib/businessDate';
 import { CONTACT_INFO } from '../constants';
@@ -8,6 +8,7 @@ import { BakeryCategory, BakeryDailyReconciliation, BakeryItem, Category, ItemCu
 import { adaptBakeryItemToMenuItem, getMenuItemPriceLabel, getMenuItemPrimaryImage } from '../lib/catalog';
 import { CustomizerModal } from '../components/CustomizerModal';
 import { SafeImage } from '../components/SafeImage';
+import { getItemRatingSummaryForItem } from '../lib/itemRatings';
 
 const LOW_STOCK_THRESHOLD = 3;
 
@@ -201,6 +202,7 @@ export const BakeryView: React.FC<BakeryViewProps> = ({
           <div className="space-y-4">
             {activeItems.map((item) => {
               const menuItem = adaptBakeryItemToMenuItem(item, categoryMap[item.bakeryCategoryId]);
+              const ratingSummary = getItemRatingSummaryForItem(item);
               const isMadeToOrder = item.fulfillmentMode === 'made_to_order';
               const rawQty = item.id in availabilityByItemId ? availabilityByItemId[item.id] : undefined;
               const stockStatus = stockDataLoaded ? getStockStatus(rawQty) : 'unknown';
@@ -223,6 +225,18 @@ export const BakeryView: React.FC<BakeryViewProps> = ({
                         </span>
                       </div>
                       <p className="text-sm text-[var(--color-text-muted)] italic line-clamp-2">"{item.description}"</p>
+                      <div className="mt-2 flex items-center gap-2">
+                        {ratingSummary.hasRatings ? (
+                          <div className="flex items-center gap-1 rounded-full bg-[var(--color-rating)]/10 px-2.5 py-1 text-[10px] font-black text-[var(--color-rating)]">
+                            <Star className="w-3 h-3 fill-[var(--color-rating)]" />
+                            <span>{ratingSummary.summaryLabel}</span>
+                          </div>
+                        ) : (
+                          <p className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">
+                            {ratingSummary.summaryLabel}
+                          </p>
+                        )}
+                      </div>
                       <div className="flex items-center gap-2 mt-2">
                         <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]">
                           {isMadeToOrder ? 'Made to order' : 'Ready to serve'}

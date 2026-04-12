@@ -1,14 +1,15 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Trash2, Plus, Minus, Send, Phone, Wallet, Truck, ShoppingBag, MapPin, Sparkles, Clock, UserCheck, AlertCircle, Utensils, Pizza, MessageSquare, Info, CheckCircle2, User, Package, History, ChevronRight, RefreshCw, Tag, Edit } from 'lucide-react';
-import { AppUserRecord, CartItem, FinancialStatus, OrderStatus, OrderType, DeliveryArea, UserProfile, HistoricalOrder, ItemCustomization, RestaurantSettings, PersistedOrder } from '../types';
+import { Trash2, Plus, Minus, Send, Phone, Wallet, Truck, ShoppingBag, MapPin, Sparkles, Clock, UserCheck, AlertCircle, Utensils, Pizza, MessageSquare, Info, CheckCircle2, User, Package, History, ChevronRight, RefreshCw, Tag, Edit, Star } from 'lucide-react';
+import { AppUserRecord, CartItem, FinancialStatus, ItemRating, OrderStatus, OrderType, DeliveryArea, UserProfile, HistoricalOrder, ItemCustomization, ItemServiceArea, RestaurantSettings, PersistedOrder, PersistedOrderItem } from '../types';
 import { DELIVERY_OPTIONS, CATEGORY_ICONS } from '../constants';
 import { CustomizerModal } from '../components/CustomizerModal';
 import { getCartItemUnitPrice, getCategoryIconKey, getDeliveryOptions, getMomoDialHref, getRestaurantContactInfo, getWhatsAppHref } from '../lib/catalog';
 import { createOrder, validateOrderInput } from '../lib/orderPersistence';
 import { formatBusinessDateDisplay, toBusinessDate } from '../lib/businessDate';
 import { db } from '../lib/firebase';
-import { collection, doc, limit, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, doc, limit, onSnapshot, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
+import { ITEM_RATINGS_COLLECTION, buildItemRatingDocId, normalizeItemRating } from '../lib/itemRatings';
 
 interface OrdersViewProps {
   cart: CartItem[];
@@ -36,6 +37,60 @@ interface OrdersViewProps {
   hidePersonalOrderWidgets?: boolean;
 }
 
+interface RateableOrderItem {
+  itemId: string;
+  itemName: string;
+  quantityPurchased: number;
+  serviceArea: ItemServiceArea;
+}
+
+interface LiveOrderRatingMeta {
+  canRate: boolean;
+  orderEntryMode: 'customer_self' | 'staff_assisted';
+  ownerUserId: string | null;
+  businessDate: string;
+  items: RateableOrderItem[];
+}
+
+function normalizeRateableOrderItems(items: unknown): RateableOrderItem[] {
+  if (!Array.isArray(items)) return [];
+
+  return items.flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const record = item as Partial<PersistedOrderItem>;
+    if (typeof record.itemId !== 'string' || typeof record.itemName !== 'string' || typeof record.quantity !== 'number' || record.quantity <= 0) {
+      return [];
+    }
+
+    return [{
+      itemId: record.itemId,
+      itemName: record.itemName,
+      quantityPurchased: record.quantity,
+      serviceArea: record.serviceArea === 'bakery' ? 'bakery' : 'cafe',
+    }];
+  });
+}
+
+function groupRateableItems(items: RateableOrderItem[]): RateableOrderItem[] {
+  const grouped = new Map<string, RateableOrderItem>();
+
+  items.forEach((item) => {
+    const key = `${item.serviceArea}__${item.itemId}`;
+    const existing = grouped.get(key);
+    if (!existing) {
+      grouped.set(key, { ...item });
+      return;
+    }
+
+    grouped.set(key, {
+      ...existing,
+      quantityPurchased: existing.quantityPurchased + item.quantityPurchased,
+    });
+  });
+
+  return Array.from(grouped.values());
+}
+
 export const OrdersView: React.FC<OrdersViewProps> = ({ 
   cart, updateQuantity, removeFromCart, clearCart, loyaltyPoints, userProfile, setUserProfile, onOrderComplete, orderHistory, guestOrderRefs, onReorder, onUpdateCustomization, settings, userId, orderEntryContext, hideIdentityCapture = false, lockedStaffOrderSource, hidePersonalOrderWidgets = false
 }) => {
@@ -47,8 +102,14 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [receiptByOrderId, setReceiptByOrderId] = useState<Record<string, HistoricalOrder['receipt']>>({});
   const [expandedReceiptOrderId, setExpandedReceiptOrderId] = useState<string | null>(null);
+  const [expandedRatingOrderId, setExpandedRatingOrderId] = useState<string | null>(null);
   const [liveOrderStatusById, setLiveOrderStatusById] = useState<Record<string, OrderStatus>>({});
   const [liveOrderUpdatedAtById, setLiveOrderUpdatedAtById] = useState<Record<string, string>>({});
+  const [liveOrderRatingMetaById, setLiveOrderRatingMetaById] = useState<Record<string, LiveOrderRatingMeta>>({});
+  const [existingRatingsById, setExistingRatingsById] = useState<Record<string, ItemRating>>({});
+  const [ratingDraftsById, setRatingDraftsById] = useState<Record<string, { stars: number; comment: string }>>({});
+  const [ratingSubmitStateById, setRatingSubmitStateById] = useState<Record<string, 'idle' | 'saving' | 'saved' | 'error'>>({});
+  const [ratingErrorById, setRatingErrorById] = useState<Record<string, string>>({});
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
   const [identityValidationError, setIdentityValidationError] = useState<string | null>(null);
   const [entryMode, setEntryMode] = useState<'customer_self' | 'staff_assisted'>(orderEntryContext?.defaultMode || 'customer_self');
@@ -121,6 +182,73 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
     if (mode === 'pickup') return 'pickup';
     if (mode === 'delivery') return 'delivery';
     return 'pickup';
+  };
+
+  const updateRatingDraft = (ratingId: string, patch: Partial<{ stars: number; comment: string }>) => {
+    setRatingDraftsById((prev) => {
+      const current = prev[ratingId] || { stars: 0, comment: '' };
+      return {
+        ...prev,
+        [ratingId]: {
+          ...current,
+          ...patch,
+        },
+      };
+    });
+    setRatingSubmitStateById((prev) => ({ ...prev, [ratingId]: 'idle' }));
+    setRatingErrorById((prev) => {
+      if (!(ratingId in prev)) return prev;
+      const next = { ...prev };
+      delete next[ratingId];
+      return next;
+    });
+  };
+
+  const submitItemRating = async (orderId: string, item: RateableOrderItem) => {
+    if (!userId) return;
+
+    const ratingId = buildItemRatingDocId(orderId, item.serviceArea, item.itemId);
+    const draft = ratingDraftsById[ratingId] || { stars: existingRatingsById[ratingId]?.stars || 0, comment: existingRatingsById[ratingId]?.comment || '' };
+    if (!draft.stars || draft.stars < 1 || draft.stars > 5) {
+      setRatingErrorById((prev) => ({ ...prev, [ratingId]: 'Choose a star rating before submitting.' }));
+      setRatingSubmitStateById((prev) => ({ ...prev, [ratingId]: 'error' }));
+      return;
+    }
+
+    setRatingSubmitStateById((prev) => ({ ...prev, [ratingId]: 'saving' }));
+    setRatingErrorById((prev) => {
+      if (!(ratingId in prev)) return prev;
+      const next = { ...prev };
+      delete next[ratingId];
+      return next;
+    });
+
+    const existingRating = existingRatingsById[ratingId];
+    const ratingMeta = liveOrderRatingMetaById[orderId];
+
+    try {
+      await setDoc(doc(db, ITEM_RATINGS_COLLECTION, ratingId), {
+        orderId,
+        itemId: item.itemId,
+        itemName: item.itemName,
+        serviceArea: item.serviceArea,
+        stars: draft.stars,
+        comment: draft.comment.trim().slice(0, 500),
+        customerDisplayName: userProfile.name.trim() || 'KUCI Customer',
+        userId,
+        quantityPurchased: item.quantityPurchased,
+        businessDate: ratingMeta?.businessDate || toBusinessDate(),
+        ...(existingRating?.createdAt ? { createdAt: existingRating.createdAt } : { createdAt: serverTimestamp() }),
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      setRatingSubmitStateById((prev) => ({ ...prev, [ratingId]: 'saved' }));
+    } catch (error) {
+      setRatingSubmitStateById((prev) => ({ ...prev, [ratingId]: 'error' }));
+      setRatingErrorById((prev) => ({
+        ...prev,
+        [ratingId]: error instanceof Error ? error.message : 'Could not save your rating right now.',
+      }));
+    }
   };
 
   useEffect(() => {
@@ -440,6 +568,12 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
               delete next[orderId];
               return next;
             });
+            setLiveOrderRatingMetaById((prev) => {
+              if (!(orderId in prev)) return prev;
+              const next = { ...prev };
+              delete next[orderId];
+              return next;
+            });
             delete lastKnownStatusByIdRef.current[orderId];
             setReceiptByOrderId((prev) => {
               if (!(orderId in prev)) return prev;
@@ -471,6 +605,25 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
             data.updatedAt && typeof (data.updatedAt as { toDate?: () => Date }).toDate === 'function'
               ? (data.updatedAt as { toDate: () => Date }).toDate().toLocaleString('en-GB')
               : null;
+          const normalizedOrderEntryMode = data.orderEntryMode === 'staff_assisted' ? 'staff_assisted' : 'customer_self';
+          const normalizedOwnerUserId = typeof data.userId === 'string' ? data.userId : null;
+          const businessDate = typeof data.businessDate === 'string' ? data.businessDate : toBusinessDate();
+          const normalizedOrderItems = groupRateableItems(normalizeRateableOrderItems(data.items));
+          const canRate = normalizedStatus === 'completed' &&
+            normalizedOrderEntryMode === 'customer_self' &&
+            !!userId &&
+            normalizedOwnerUserId === userId;
+
+          setLiveOrderRatingMetaById((prev) => ({
+            ...prev,
+            [orderId]: {
+              canRate,
+              orderEntryMode: normalizedOrderEntryMode,
+              ownerUserId: normalizedOwnerUserId,
+              businessDate,
+              items: normalizedOrderItems,
+            },
+          }));
 
           if (normalizedStatus) {
             setLiveOrderStatusById((prev) => ({ ...prev, [orderId]: normalizedStatus }));
@@ -537,7 +690,55 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
     };
-  }, [trackedOrderIds]);
+  }, [trackedOrderIds, userId]);
+
+  useEffect(() => {
+    const ratingTargets = (Object.entries(liveOrderRatingMetaById) as Array<[string, LiveOrderRatingMeta]>).flatMap(([orderId, meta]) => {
+      if (!meta.canRate) return [];
+      return meta.items.map((item) => ({
+        ratingId: buildItemRatingDocId(orderId, item.serviceArea, item.itemId),
+      }));
+    });
+
+    if (ratingTargets.length === 0) {
+      setExistingRatingsById({});
+      return;
+    }
+
+    const uniqueRatingIds = Array.from(new Set(ratingTargets.map((entry) => entry.ratingId)));
+    const unsubscribers = uniqueRatingIds.map((ratingId) =>
+      onSnapshot(doc(db, ITEM_RATINGS_COLLECTION, ratingId), (snapshot) => {
+        if (!snapshot.exists()) {
+          setExistingRatingsById((prev) => {
+            if (!(ratingId in prev)) return prev;
+            const next = { ...prev };
+            delete next[ratingId];
+            return next;
+          });
+          return;
+        }
+
+        const normalized = normalizeItemRating(snapshot.id, snapshot.data());
+        if (!normalized) return;
+
+        setExistingRatingsById((prev) => ({ ...prev, [ratingId]: normalized }));
+        setRatingDraftsById((prev) => {
+          if (prev[ratingId]) return prev;
+          return {
+            ...prev,
+            [ratingId]: {
+              stars: normalized.stars,
+              comment: normalized.comment || '',
+            },
+          };
+        });
+      })
+    );
+
+    return () => {
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [liveOrderRatingMetaById]);
 
   useEffect(() => {
     const staffUid = orderEntryContext?.staffIdentity?.uid;
@@ -693,6 +894,10 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
             const customerStatusLabel = formatCustomerOrderStatus(liveStatus);
             const liveUpdatedAt = liveOrderUpdatedAtById[orderId];
             const receipt = receiptByOrderId[orderId];
+            const ratingMeta = liveOrderRatingMetaById[orderId];
+            const rateableItems = ratingMeta?.items || [];
+            const canRateThisOrder = ratingMeta?.canRate === true && rateableItems.length > 0;
+            const isRatingOpen = expandedRatingOrderId === orderId;
 
             const fallbackOrder: HistoricalOrder = order || {
               id: orderId,
@@ -747,6 +952,93 @@ export const OrdersView: React.FC<OrdersViewProps> = ({
               >
                 <RefreshCw className="w-4 h-4" /> Order Again
               </button>
+              {canRateThisOrder && (
+                <div className="mt-3 rounded-[18px] border border-[var(--color-border)] bg-white p-3">
+                  <button
+                    onClick={() => setExpandedRatingOrderId((current) => current === orderId ? null : orderId)}
+                    className="w-full flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-[var(--color-primary)]"
+                  >
+                    <span>Rate Items</span>
+                    <ChevronRight className={`w-3.5 h-3.5 transition-transform ${isRatingOpen ? 'rotate-90' : ''}`} />
+                  </button>
+                  {isRatingOpen && (
+                    <div className="mt-3 space-y-4">
+                      <p className="text-xs text-[var(--color-text-muted)]">
+                        Rate each purchased item once for this completed self-order. Staff-assisted orders are excluded in this pass.
+                      </p>
+                      {rateableItems.map((item) => {
+                        const ratingId = buildItemRatingDocId(orderId, item.serviceArea, item.itemId);
+                        const existingRating = existingRatingsById[ratingId];
+                        const draft = ratingDraftsById[ratingId] || {
+                          stars: existingRating?.stars || 0,
+                          comment: existingRating?.comment || '',
+                        };
+                        const submitState = ratingSubmitStateById[ratingId] || 'idle';
+
+                        return (
+                          <div key={ratingId} className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-secondary)]/40 p-4 space-y-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="text-sm font-semibold text-[var(--color-text)]">{item.itemName}</p>
+                                <p className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">
+                                  {item.serviceArea} · purchased x{item.quantityPurchased}
+                                </p>
+                              </div>
+                              {existingRating && (
+                                <span className="rounded-full bg-emerald-50 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-emerald-700">
+                                  Rated {existingRating.stars}/5
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-1">
+                              {[1, 2, 3, 4, 5].map((starValue) => (
+                                <button
+                                  key={starValue}
+                                  type="button"
+                                  onClick={() => updateRatingDraft(ratingId, { stars: starValue })}
+                                  className="rounded-full p-1.5 transition-transform active:scale-90"
+                                  aria-label={`Rate ${item.itemName} ${starValue} stars`}
+                                >
+                                  <Star className={`w-5 h-5 ${starValue <= draft.stars ? 'fill-[var(--color-rating)] text-[var(--color-rating)]' : 'text-[var(--color-border)]'}`} />
+                                </button>
+                              ))}
+                            </div>
+
+                            <textarea
+                              value={draft.comment}
+                              onChange={(event) => updateRatingDraft(ratingId, { comment: event.target.value })}
+                              placeholder="Optional comment"
+                              rows={3}
+                              className="w-full rounded-2xl border border-[var(--color-border)] bg-white px-4 py-3 text-sm outline-none focus:border-[var(--color-primary)]"
+                            />
+
+                            {ratingErrorById[ratingId] && (
+                              <p className="text-xs text-rose-600">{ratingErrorById[ratingId]}</p>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() => void submitItemRating(orderId, item)}
+                              disabled={submitState === 'saving'}
+                              className="w-full rounded-2xl bg-[var(--color-text)] px-4 py-3 text-[10px] font-black uppercase tracking-widest text-white disabled:opacity-60"
+                            >
+                              {submitState === 'saving'
+                                ? 'Saving...'
+                                : existingRating
+                                  ? 'Update Rating'
+                                  : 'Submit Rating'}
+                            </button>
+                            {submitState === 'saved' && (
+                              <p className="text-xs text-emerald-700">Saved. Item averages update from Firestore aggregates.</p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
               {receipt && (
                 <div className="mt-3 rounded-[18px] border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-3">
                   <button

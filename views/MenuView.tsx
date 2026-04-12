@@ -4,6 +4,7 @@ import { ArrowRight, Plus, Info, Heart, Star, Utensils, Coffee, Pizza, Wine, Gla
 import { Category, MenuItem, ItemCustomization } from '../types';
 import { CustomizerModal } from '../components/CustomizerModal';
 import { getMenuItemCategoryId, getMenuItemPriceLabel } from '../lib/catalog';
+import { getItemRatingSummaryForItem } from '../lib/itemRatings';
 
 interface StaffOrderSession {
   customerName: string;
@@ -137,7 +138,9 @@ export const MenuView: React.FC<MenuViewProps> = ({
 
         <div className="space-y-4">
           {filteredItems.length > 0 ? (
-            filteredItems.map((item) => (
+            filteredItems.map((item) => {
+              const ratingSummary = getItemRatingSummaryForItem(item);
+              return (
               <div 
                 key={item.id} 
                 className="bg-[var(--color-bg)] rounded-3xl p-4 shadow-sm border border-[var(--color-border)] flex flex-col gap-3 group active:scale-[0.98] transition-transform relative"
@@ -146,13 +149,18 @@ export const MenuView: React.FC<MenuViewProps> = ({
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
                       <h4 className="font-bold text-[var(--color-text)] text-lg leading-tight uppercase font-serif tracking-tight">{item.name}</h4>
-                      {item.averageRating && (
+                      {ratingSummary.hasRatings && (
                         <div className="flex items-center gap-0.5 bg-[var(--color-rating)]/10 px-2 py-0.5 rounded-lg border border-[var(--color-rating)]/20">
                           <Star className="w-2.5 h-2.5 text-[var(--color-rating)] fill-[var(--color-rating)]" />
-                          <span className="text-[10px] font-black text-[var(--color-rating)]">{item.averageRating.toFixed(1)}</span>
+                          <span className="text-[10px] font-black text-[var(--color-rating)]">{ratingSummary.summaryLabel}</span>
                         </div>
                       )}
                     </div>
+                    {!ratingSummary.hasRatings && (
+                      <p className="mt-1 text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">
+                        {ratingSummary.summaryLabel}
+                      </p>
+                    )}
                     {item.tagline && (
                       <p className="text-[var(--color-primary)] text-[10px] font-bold uppercase tracking-widest mt-1">
                         {item.tagline}
@@ -191,7 +199,7 @@ export const MenuView: React.FC<MenuViewProps> = ({
                   Add to Order
                 </button>
               </div>
-            ))
+            )})
           ) : (
             <div className="text-center py-20 bg-[var(--color-primary)]/5 rounded-[40px] border-2 border-dashed border-[var(--color-border)]">
               <p className="text-[var(--color-text-muted)] italic">No items found in this category.</p>

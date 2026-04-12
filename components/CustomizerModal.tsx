@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { X, Check, Edit3, MessageSquare, Info, CheckCircle2, Star, Send, User, Tag } from 'lucide-react';
+import { X, Check, Edit3, MessageSquare, Info, CheckCircle2, Star, User, Tag } from 'lucide-react';
 import { EXTRA_COSTS } from '../constants';
 import { ItemCustomization, MenuItem, ModifierGroup, Review } from '../types';
 import { getDefaultVariant, getMenuItemBasePrice, getMenuItemPrimaryImage } from '../lib/catalog';
+import { getItemRatingSummaryForItem } from '../lib/itemRatings';
 import { SafeImage } from './SafeImage';
 
 interface CustomizerModalProps {
@@ -30,11 +31,6 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({ item, initialC
   const [instructions, setInstructions] = useState('');
   const [isSuccess, setIsSuccess] = useState(false);
 
-  const [showReviewForm, setShowReviewForm] = useState(false);
-  const [newReviewRating, setNewReviewRating] = useState(5);
-  const [newReviewComment, setNewReviewComment] = useState('');
-  const [newReviewName, setNewReviewName] = useState('');
-
   useEffect(() => {
     if (!item) return;
 
@@ -52,7 +48,6 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({ item, initialC
     setExtra1(initialCustomization?.extras?.[0] || '');
     setExtra2(initialCustomization?.extras?.[1] || '');
     setInstructions(initialCustomization?.instructions || '');
-    setShowReviewForm(false);
   }, [item, initialCustomization]);
 
   const selectedVariant = useMemo(() => {
@@ -98,8 +93,9 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({ item, initialC
       return count >= minSelections;
     });
   }, [item, selectedOptions]);
-
   if (!item) return null;
+
+  const ratingSummary = getItemRatingSummaryForItem(item);
 
   const toggleOption = (group: ModifierGroup, optionId: string) => {
     setSelectedOptions((prev) => {
@@ -183,10 +179,14 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({ item, initialC
                     {item.tagline}
                   </p>
                 )}
-                {item.averageRating && (
+                {ratingSummary.hasRatings ? (
                   <div className="flex items-center gap-1 bg-[var(--color-rating)]/10 px-2 py-1 rounded-lg">
                     <Star className="w-3 h-3 text-[var(--color-rating)] fill-[var(--color-rating)]" />
-                    <span className="text-[10px] font-black text-[var(--color-primary)]">{item.averageRating.toFixed(1)}</span>
+                    <span className="text-[10px] font-black text-[var(--color-primary)]">{ratingSummary.summaryLabel}</span>
+                  </div>
+                ) : (
+                  <div className="text-[10px] font-black uppercase tracking-widest text-[var(--color-text-muted)]">
+                    {ratingSummary.summaryLabel}
                   </div>
                 )}
               </div>
@@ -353,48 +353,10 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({ item, initialC
                 </div>
                 Guest Reviews
               </h4>
-              <button
-                onClick={() => setShowReviewForm(!showReviewForm)}
-                className="text-[10px] font-black text-[var(--color-primary)] uppercase tracking-widest border-b border-[var(--color-primary)]/30 pb-0.5"
-              >
-                {showReviewForm ? 'Cancel' : 'Write a Review'}
-              </button>
+              <p className="text-[10px] font-black text-[var(--color-primary)] uppercase tracking-widest">
+                Rate from completed orders
+              </p>
             </div>
-
-            {showReviewForm && (
-              <div className="bg-white border border-[var(--color-border)] rounded-[32px] p-6 space-y-4 shadow-sm animate-in zoom-in-95 duration-300">
-                <div className="space-y-1">
-                  <p className="text-[9px] font-black text-[var(--color-text-muted)] uppercase tracking-widest px-1">Your Rating</p>
-                  <div className="flex items-center gap-2">
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <button key={star} onClick={() => setNewReviewRating(star)} className="p-1 transition-transform active:scale-75">
-                        <Star className={`w-6 h-6 ${star <= newReviewRating ? 'text-[var(--color-rating)] fill-[var(--color-rating)]' : 'text-[var(--color-border)]'}`} />
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <input
-                  type="text"
-                  value={newReviewName}
-                  onChange={(event) => setNewReviewName(event.target.value)}
-                  placeholder="Your Name"
-                  className="w-full px-5 py-4 rounded-2xl bg-[var(--color-bg-secondary)]/30 border-2 border-transparent focus:border-[var(--color-primary)] focus:bg-white outline-none text-sm transition-all"
-                />
-                <textarea
-                  value={newReviewComment}
-                  onChange={(event) => setNewReviewComment(event.target.value)}
-                  placeholder="What did you think of the flavor?"
-                  rows={3}
-                  className="w-full px-5 py-4 rounded-2xl bg-[var(--color-bg-secondary)]/30 border-2 border-transparent focus:border-[var(--color-primary)] focus:bg-white outline-none text-sm resize-none transition-all"
-                />
-                <button
-                  disabled={!newReviewComment || !newReviewName}
-                  className="w-full bg-[var(--color-text)] text-white py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 disabled:opacity-30 disabled:grayscale transition-all"
-                >
-                  Post Review <Send className="w-3 h-3" />
-                </button>
-              </div>
-            )}
 
             {item.reviews && item.reviews.length > 0 ? (
               <div className="space-y-6">
@@ -423,7 +385,7 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({ item, initialC
             ) : (
               <div className="text-center py-10 bg-[var(--color-bg-secondary)]/20 rounded-[32px] border-2 border-dashed border-[var(--color-border)]">
                 <MessageSquare className="w-8 h-8 text-[var(--color-border)] mx-auto mb-3" />
-                <p className="text-[10px] text-[var(--color-text-muted)] italic">No reviews yet. Be the first to share your thoughts!</p>
+                <p className="text-[10px] text-[var(--color-text-muted)] italic">No ratings yet. Completed self-orders can leave the first review from Order History.</p>
               </div>
             )}
           </section>
